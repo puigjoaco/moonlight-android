@@ -64,3 +64,21 @@ APK: `app/build/outputs/apk/nonRoot/debug/app-nonRoot-debug.apk`.
 The JVM tests cover density rounding, native portrait/landscape dimensions, and
 axis-change reconnect policy. Real-device rotation and teardown timing require
 a paired device and a live host check.
+
+In **Trackpad** + **Remote desktop mouse mode**, finger motion uses fullscreen
+view pixels on both axes before Moonlight converts it into absolute packets.
+This gives equal visual motion in portrait and landscape and bypasses host mouse
+acceleration. Host desktop scale is applied by Sunshine, not a second time here.
+Game-mode mouse input and two-finger scroll sensitivity retain upstream behavior.
+
+For a live measurement, first obtain a confirmed hands-off window and install
+the APK on the paired phone. Open the stream manually, then run
+`tools/check-trackpad.py --serial <phone-ip>:<port> --width 1440 --height 3120 --scale 2.5 --hands-off-confirmed`.
+Use the current port from `~/Android/Sdk/platform-tools/adb mdns services`.
+The script uses only that ADB binary and the selected device. It sends 100px horizontal, vertical and diagonal swipes at two speeds,
+reads `workspace.cursorPos`, and expects 40 logical pixels per axis at scale 2.5.
+Reconnect manually in landscape and repeat with width/height swapped. Repeat at
+scale 1, expecting 100 logical pixels. Keep the cursor away from desktop edges.
+Then manually check one/two-finger taps, drag, two-finger scroll and direct-touch
+tap placement. The script does not measure visual latency, cursor rendering or
+absolute-touch taps.

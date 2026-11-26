@@ -29,6 +29,12 @@ import javax.crypto.SecretKey;
 import org.xmlpull.v1.XmlPullParserException;
 
 import com.limelight.LimeLog;
+import com.limelight.binding.input.keyboard.CursorPosition;
+import com.limelight.binding.input.keyboard.TextInput;
+import com.limelight.binding.input.keyboard.ReliableInputSender;
+import java.nio.charset.StandardCharsets;
+import com.limelight.binding.input.keyboard.VirtualKey;
+import com.limelight.nvstream.input.KeyboardPacket;
 import com.limelight.nvstream.av.audio.AudioRenderer;
 import com.limelight.nvstream.av.video.VideoDecoderRenderer;
 import com.limelight.nvstream.http.ComputerDetails;
@@ -41,6 +47,24 @@ import com.limelight.nvstream.input.MouseButtonPacket;
 import com.limelight.nvstream.jni.MoonBridge;
 
 public class NvConnection {
+    /** Observes every input route, including touch timers, USB and controller-emulated mouse clicks. */
+    public interface InputObserver {
+        void nonModifierDown();
+        void nonModifierUp();
+        String beforeText(String text);
+        void afterText();
+        int modifierFlags();
+        void textBatch(Runnable planner);
+        void pointerMoved();
+    }
+    private volatile InputObserver inputObserver;
+    private final ReliableInputSender inputSender = new ReliableInputSender();
+    private final CursorPosition cursorPosition = new CursorPosition();
+    private volatile boolean absolutePointer;
+    public void setInputObserver(InputObserver observer) { inputObserver = observer; }
+    public float getCursorY() { return cursorPosition.y(); }
+    public boolean hasAbsolutePointer() { return absolutePointer; }
+
     // Context parameters
     private LimelightCryptoProvider cryptoProvider;
     private String uniqueId;
@@ -87,6 +111,7 @@ public class NvConnection {
     }
 
     public void stop() {
+        inputSender.close(); // Join before native teardown or a replacement session can start.
         // Interrupt any pending connection. This is thread-safe.
         MoonBridge.interruptConnection();
 
@@ -450,38 +475,55 @@ public class NvConnection {
         }).start();
     }
     
+    // Motion/scroll methods retain native coalescing semantics: a failed offer may
+    // already have accumulated their delta, so repeating the JNI call would duplicate it.
     public void sendMouseMove(final short deltaX, final short deltaY)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseMove(deltaX, deltaY);
+            absolutePointer = false;
+            inputSender.enqueue(() -> { MoonBridge.sendMouseMove(deltaX, deltaY); return 0; });
+            InputObserver observer = inputObserver;
+            if (observer != null) observer.pointerMoved();
         }
     }
 
     public void sendMousePosition(short x, short y, short referenceWidth, short referenceHeight)
     {
         if (!isMonkey) {
-            MoonBridge.sendMousePosition(x, y, referenceWidth, referenceHeight);
+            cursorPosition.absolute(x, y, referenceWidth, referenceHeight);
+            absolutePointer = true;
+            inputSender.enqueue(() -> { MoonBridge.sendMousePosition(x, y, referenceWidth, referenceHeight); return 0; });
+            InputObserver observer = inputObserver;
+            if (observer != null) observer.pointerMoved();
         }
     }
 
     public void sendMouseMoveAsMousePosition(short deltaX, short deltaY, short referenceWidth, short referenceHeight)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseMoveAsMousePosition(deltaX, deltaY, referenceWidth, referenceHeight);
+            cursorPosition.relative(deltaX, deltaY, referenceWidth, referenceHeight);
+            absolutePointer = true;
+            inputSender.enqueue(() -> { MoonBridge.sendMouseMoveAsMousePosition(deltaX, deltaY, referenceWidth, referenceHeight); return 0; });
+            InputObserver observer = inputObserver;
+            if (observer != null) observer.pointerMoved();
         }
     }
 
     public void sendMouseButtonDown(final byte mouseButton)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseButton(MouseButtonPacket.PRESS_EVENT, mouseButton);
+            InputObserver observer = inputObserver;
+            if (observer != null) observer.nonModifierDown();
+            inputSender.enqueue(() -> MoonBridge.sendMouseButton(MouseButtonPacket.PRESS_EVENT, mouseButton));
         }
     }
     
     public void sendMouseButtonUp(final byte mouseButton)
     {
         if (!isMonkey) {
-            MoonBridge.sendMouseButton(MouseButtonPacket.RELEASE_EVENT, mouseButton);
+            inputSender.enqueue(() -> MoonBridge.sendMouseButton(MouseButtonPacket.RELEASE_EVENT, mouseButton));
+            InputObserver observer = inputObserver;
+            if (observer != null) observer.nonModifierUp();
         }
     }
     
@@ -499,33 +541,31 @@ public class NvConnection {
 
     public void sendKeyboardInput(final short keyMap, final byte keyDirection, final byte modifier, final byte flags) {
         if (!isMonkey) {
-            MoonBridge.sendKeyboardInput(keyMap, keyDirection, modifier, flags);
+            InputObserver observer = inputObserver;
+            boolean ordinaryKey = !VirtualKey.isModifier(keyMap & 0xFF);
+            if (observer != null && ordinaryKey && keyDirection == KeyboardPacket.KEY_DOWN) observer.nonModifierDown();
+            final byte combined = (byte)(modifier | (observer == null ? 0 : observer.modifierFlags()));
+            inputSender.enqueue(() -> MoonBridge.sendKeyboardInput(keyMap, keyDirection, combined, flags));
+            if (observer != null && ordinaryKey && keyDirection == KeyboardPacket.KEY_UP) observer.nonModifierUp();
         }
     }
     
-    public void sendMouseScroll(final byte scrollClicks) {
-        if (!isMonkey) {
-            MoonBridge.sendMouseHighResScroll((short)(scrollClicks * 120)); // WHEEL_DELTA
-        }
+    private void sendScroll(final short amount, final boolean horizontal) {
+        if (isMonkey || amount == 0) return;
+        InputObserver observer = inputObserver;
+        if (observer != null) observer.nonModifierDown();
+        inputSender.enqueue(() -> {
+            if (horizontal) MoonBridge.sendMouseHighResHScroll(amount);
+            else MoonBridge.sendMouseHighResScroll(amount);
+            return 0;
+        });
+        if (observer != null) observer.nonModifierUp();
     }
 
-    public void sendMouseHScroll(final byte scrollClicks) {
-        if (!isMonkey) {
-            MoonBridge.sendMouseHighResHScroll((short)(scrollClicks * 120)); // WHEEL_DELTA
-        }
-    }
-
-    public void sendMouseHighResScroll(final short scrollAmount) {
-        if (!isMonkey) {
-            MoonBridge.sendMouseHighResScroll(scrollAmount);
-        }
-    }
-
-    public void sendMouseHighResHScroll(final short scrollAmount) {
-        if (!isMonkey) {
-            MoonBridge.sendMouseHighResHScroll(scrollAmount);
-        }
-    }
+    public void sendMouseScroll(final byte scrollClicks) { sendScroll((short)(scrollClicks * 120), false); }
+    public void sendMouseHScroll(final byte scrollClicks) { sendScroll((short)(scrollClicks * 120), true); }
+    public void sendMouseHighResScroll(final short scrollAmount) { sendScroll(scrollAmount, false); }
+    public void sendMouseHighResHScroll(final short scrollAmount) { sendScroll(scrollAmount, true); }
 
     public int sendTouchEvent(byte eventType, int pointerId, float x, float y, float pressureOrDistance,
                               float contactAreaMajor, float contactAreaMinor, short rotation) {
@@ -579,10 +619,25 @@ public class NvConnection {
         MoonBridge.sendControllerBatteryEvent(controllerNumber, batteryState, batteryPercentage);
     }
 
+    /** Single text entry point for IME commits and legacy ACTION_MULTIPLE/unmapped characters. */
     public void sendUtf8Text(final String text) {
-        if (!isMonkey) {
-            MoonBridge.sendUtf8Text(text);
-        }
+        if (isMonkey || text == null || text.isEmpty()) return;
+        Runnable planner = () -> inputSender.batch(() -> TextInput.send(text, new TextInput.Sink() {
+            @Override public void key(int vk, boolean down) {
+                sendKeyboardInput((short)(0x8000 | vk),
+                        down ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP, (byte)0, (byte)0);
+            }
+            @Override public void unicode(String value) {
+                InputObserver observer = inputObserver;
+                if (observer != null) value = observer.beforeText(value);
+                try {
+                    final byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+                    inputSender.enqueue(() -> MoonBridge.sendUtf8Text(bytes));
+                } finally { if (observer != null) observer.afterText(); }
+            }
+        }));
+        InputObserver observer = inputObserver;
+        if (observer != null) observer.textBatch(planner); else planner.run();
     }
 
     public static String findExternalAddressForMdns(String stunHostname, int stunPort) {

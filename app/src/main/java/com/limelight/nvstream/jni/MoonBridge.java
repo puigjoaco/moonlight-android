@@ -360,7 +360,7 @@ public class MoonBridge {
 
     public static native void sendMouseMoveAsMousePosition(short deltaX, short deltaY, short referenceWidth, short referenceHeight);
 
-    public static native void sendMouseButton(byte buttonEvent, byte mouseButton);
+    public static native int sendMouseButton(byte buttonEvent, byte mouseButton);
 
     public static native void sendMultiControllerInput(short controllerNumber,
                                     short activeGamepadMask, int buttonFlags,
@@ -383,13 +383,13 @@ public class MoonBridge {
 
     public static native int sendControllerBatteryEvent(byte controllerNumber, byte batteryState, byte batteryPercentage);
 
-    public static native void sendKeyboardInput(short keyMap, byte keyDirection, byte modifier, byte flags);
+    public static native int sendKeyboardInput(short keyMap, byte keyDirection, byte modifier, byte flags);
 
     public static native void sendMouseHighResScroll(short scrollAmount);
 
     public static native void sendMouseHighResHScroll(short scrollAmount);
 
-    public static native void sendUtf8Text(String text);
+    public static native int sendUtf8Text(byte[] text);
 
     public static native String getStageName(int stage);
 

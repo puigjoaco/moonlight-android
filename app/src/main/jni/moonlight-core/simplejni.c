@@ -27,9 +27,9 @@ Java_com_limelight_nvstream_jni_MoonBridge_sendMouseMoveAsMousePosition(JNIEnv *
     LiSendMouseMoveAsMousePositionEvent(deltaX, deltaY, referenceWidth, referenceHeight);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jint JNICALL
 Java_com_limelight_nvstream_jni_MoonBridge_sendMouseButton(JNIEnv *env, jclass clazz, jbyte buttonEvent, jbyte mouseButton) {
-    LiSendMouseButtonEvent(buttonEvent, mouseButton);
+    return LiSendMouseButtonEvent(buttonEvent, mouseButton);
 }
 
 JNIEXPORT void JNICALL
@@ -97,9 +97,9 @@ Java_com_limelight_nvstream_jni_MoonBridge_sendControllerBatteryEvent(JNIEnv *en
     return LiSendControllerBatteryEvent(controllerNumber, batteryState, batteryPercentage);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jint JNICALL
 Java_com_limelight_nvstream_jni_MoonBridge_sendKeyboardInput(JNIEnv *env, jclass clazz, jshort keyCode, jbyte keyAction, jbyte modifiers, jbyte flags) {
-    LiSendKeyboardEvent2(keyCode, keyAction, modifiers, flags);
+    return LiSendKeyboardEvent2(keyCode, keyAction, modifiers, flags);
 }
 
 JNIEXPORT void JNICALL
@@ -112,11 +112,13 @@ Java_com_limelight_nvstream_jni_MoonBridge_sendMouseHighResHScroll(JNIEnv *env, 
     LiSendHighResHScrollEvent(scrollAmount);
 }
 
-JNIEXPORT void JNICALL
-Java_com_limelight_nvstream_jni_MoonBridge_sendUtf8Text(JNIEnv *env, jclass clazz, jstring text) {
-    const char* utf8Text = (*env)->GetStringUTFChars(env, text, NULL);
-    LiSendUtf8TextEvent(utf8Text, strlen(utf8Text));
-    (*env)->ReleaseStringUTFChars(env, text, utf8Text);
+JNIEXPORT jint JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_sendUtf8Text(JNIEnv *env, jclass clazz, jbyteArray text) {
+    jbyte* bytes = (*env)->GetByteArrayElements(env, text, NULL);
+    if (bytes == NULL) return -1;
+    int result = LiSendUtf8TextEvent((const char*)bytes, (*env)->GetArrayLength(env, text));
+    (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
+    return result;
 }
 
 JNIEXPORT void JNICALL

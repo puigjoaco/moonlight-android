@@ -137,6 +137,10 @@
     <PreferenceCategory android:title="@string/category_input_settings"
         android:key="category_input_settings">
         <CheckBoxPreference
+            android:key="checkbox_keyboard_button"
+            android:title="@string/keyboard_button_setting"
+            android:defaultValue="true" />
+        <CheckBoxPreference
             android:key="checkbox_touchscreen_trackpad"
             android:title="@string/title_checkbox_touchscreen_trackpad"
             android:summary="@string/summary_checkbox_touchscreen_trackpad"

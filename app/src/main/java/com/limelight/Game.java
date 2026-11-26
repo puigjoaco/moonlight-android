@@ -32,6 +32,8 @@ import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
+import com.limelight.ui.KeyboardOverlay;
+import com.limelight.binding.input.keyboard.VirtualKey;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
@@ -76,7 +78,6 @@ import android.view.View.OnTouchListener;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -145,6 +146,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean waitingForAllModifiersUp = false;
     private int specialKeyCode = KeyEvent.KEYCODE_UNKNOWN;
     private StreamView streamView;
+    private KeyboardOverlay keyboardOverlay;
+    private boolean keyboardBackDown;
     private long lastAbsTouchUpTime = 0;
     private long lastAbsTouchDownTime = 0;
     private float lastAbsTouchUpX, lastAbsTouchUpY;
@@ -543,6 +546,19 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             virtualController.show();
         }
 
+        keyboardOverlay = new KeyboardOverlay(this, streamView, conn, this::sendVirtualKey);
+        conn.setInputObserver(new NvConnection.InputObserver() {
+            @Override public void nonModifierDown() { keyboardOverlay.modifiers().nonModifierDown(); }
+            @Override public void nonModifierUp() { keyboardOverlay.modifiers().nonModifierUp(); }
+            @Override public String beforeText(String text) { return keyboardOverlay.modifiers().beforeText(text); }
+            @Override public void afterText() { keyboardOverlay.modifiers().afterText(); }
+            @Override public int modifierFlags() { return keyboardOverlay.modifiers().flags(); }
+            @Override public void textBatch(Runnable planner) {
+                synchronized (keyboardOverlay.modifiers()) { planner.run(); }
+            }
+            @Override public void pointerMoved() { keyboardOverlay.pointerMoved(); }
+        });
+
         if (prefConfig.usbDriver) {
             // Start the USB driver
             bindService(new Intent(this, UsbDriverService.class),
@@ -611,6 +627,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        if (keyboardOverlay != null) {
+            keyboardOverlay.configurationChanged(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode());
+        }
 
         scheduleRotationReconnect();
 
@@ -683,6 +702,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         LimeLog.info("Reconnecting native stream for " + (portrait ? "portrait" : "landscape"));
+        if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         rotationRestart = true;
         displayedFailureDialog = true; // Expected local stop must never show a termination dialog.
         connected = connecting = false;
@@ -823,6 +843,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // We can't guarantee the state of modifiers keys which may have
         // lifted while focus was not on us. Clear the modifier state.
         this.modifierFlags = 0;
+        if (!hasFocus && keyboardOverlay != null) keyboardOverlay.releaseOwnedKeys();
 
         // With Android native pointer capture, capture is lost when focus is lost,
         // so it must be requested again when focus is regained.
@@ -1112,6 +1133,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     protected void onDestroy() {
+        if (keyboardOverlay != null) keyboardOverlay.destroy();
+        if (conn != null) conn.setInputObserver(null);
         super.onDestroy();
 
         if (controllerHandler != null) {
@@ -1139,7 +1162,20 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (keyboardOverlay != null) keyboardOverlay.setSuspended(false);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (keyboardOverlay != null && keyboardOverlay.isOpen()) keyboardOverlay.close();
+        else super.onBackPressed();
+    }
+
+    @Override
     protected void onPause() {
+        if (keyboardOverlay != null) keyboardOverlay.setSuspended(true);
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
             if (controllerHandler != null) {
@@ -1289,13 +1325,17 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             this.modifierFlags &= ~modifierMask;
         }
 
+        return handleSpecialKeyCombo(androidKeyCode, down, nonModifierKeyCode);
+    }
+
+    private boolean handleSpecialKeyCombo(int androidKeyCode, boolean down, int nonModifierKeyCode) {
         // Handle the special combos on the key up
         if (waitingForAllModifiersUp || specialKeyCode != KeyEvent.KEYCODE_UNKNOWN) {
             if (specialKeyCode == androidKeyCode) {
                 // If this is a key up for the special key itself, eat that because the host never saw the original key down
                 return true;
             }
-            else if (modifierFlags != 0) {
+            else if (getModifierState() != 0) {
                 // While we're waiting for modifiers to come up, eat all key downs and allow all key ups to pass
                 return down;
             }
@@ -1339,7 +1379,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             }
         }
         // Check if Ctrl+Alt+Shift is down when a non-modifier key is pressed
-        else if ((modifierFlags & (KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT | KeyboardPacket.MODIFIER_SHIFT)) ==
+        else if ((getModifierState() & (KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT | KeyboardPacket.MODIFIER_SHIFT)) ==
                 (KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT | KeyboardPacket.MODIFIER_SHIFT) &&
                 (down && nonModifierKeyCode != KeyEvent.KEYCODE_UNKNOWN)) {
             switch (androidKeyCode) {
@@ -1397,8 +1437,34 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return modifier;
     }
 
+    @Override
+    public void commitText(String text) { conn.sendUtf8Text(text); }
+
+    @Override
+    public void deleteText(int beforeCodePoints, int afterCodePoints) {
+        for (int i = 0; i < beforeCodePoints; i++) {
+            sendVirtualKey(VirtualKey.BACKSPACE, true);
+            sendVirtualKey(VirtualKey.BACKSPACE, false);
+        }
+        for (int i = 0; i < afterCodePoints; i++) {
+            sendVirtualKey(VirtualKey.DELETE, true);
+            sendVirtualKey(VirtualKey.DELETE, false);
+        }
+    }
+
     private byte getModifierState() {
-        return (byte) modifierFlags;
+        return (byte) (modifierFlags | (keyboardOverlay != null ? keyboardOverlay.modifiers().flags() : 0));
+    }
+
+    private void sendVirtualKey(VirtualKey key, boolean down) {
+        if (key.modifier != 0) {
+            int androidKey = key == VirtualKey.SHIFT ? KeyEvent.KEYCODE_SHIFT_LEFT :
+                    key == VirtualKey.CTRL ? KeyEvent.KEYCODE_CTRL_LEFT :
+                    key == VirtualKey.ALT ? KeyEvent.KEYCODE_ALT_LEFT : KeyEvent.KEYCODE_META_LEFT;
+            handleSpecialKeyCombo(androidKey, down, KeyEvent.KEYCODE_UNKNOWN);
+        }
+        conn.sendKeyboardInput(key.wireCode(), down ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP,
+                getModifierState(), (byte)0);
     }
 
     @Override
@@ -1408,6 +1474,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public boolean handleKeyDown(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && !event.isFromSource(InputDevice.SOURCE_MOUSE) &&
+                !event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE) && keyboardOverlay != null &&
+                (keyboardOverlay.isOpen() || keyboardBackDown)) {
+            keyboardBackDown = true;
+            keyboardOverlay.close();
+            return true;
+        }
         // Pass-through virtual navigation keys
         if ((event.getFlags() & KeyEvent.FLAG_VIRTUAL_HARD_KEY) != 0) {
             return false;
@@ -1445,6 +1518,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (!handled) {
             // Let this method take duplicate key down events
             if (handleSpecialKeys(event.getKeyCode(), true)) {
+                if (keyboardOverlay != null && !KeyEvent.isModifierKey(event.getKeyCode())) keyboardOverlay.modifiers().nonModifierDown();
                 return true;
             }
 
@@ -1464,7 +1538,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 // UTF-8 events don't auto-repeat on the host side.
                 int unicodeChar = event.getUnicodeChar();
                 if ((unicodeChar & KeyCharacterMap.COMBINING_ACCENT) == 0 && (unicodeChar & KeyCharacterMap.COMBINING_ACCENT_MASK) != 0) {
-                    conn.sendUtf8Text(""+(char)unicodeChar);
+                    conn.sendUtf8Text(new String(Character.toChars(unicodeChar)));
                     return true;
                 }
 
@@ -1490,6 +1564,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public boolean handleKeyUp(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && keyboardBackDown) {
+            keyboardBackDown = false;
+            return true;
+        }
         // Pass-through virtual navigation keys
         if ((event.getFlags() & KeyEvent.FLAG_VIRTUAL_HARD_KEY) != 0) {
             return false;
@@ -1524,6 +1602,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // Try the keyboard handler if it wasn't handled as a game controller
         if (!handled) {
             if (handleSpecialKeys(event.getKeyCode(), false)) {
+                if (keyboardOverlay != null && !KeyEvent.isModifierKey(event.getKeyCode())) keyboardOverlay.modifiers().nonModifierUp();
                 return true;
             }
 
@@ -1552,7 +1631,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return handleKeyMultiple(event) || super.onKeyMultiple(keyCode, repeatCount, event);
     }
 
-    private boolean handleKeyMultiple(KeyEvent event) {
+    @Override
+    public boolean handleKeyMultiple(KeyEvent event) {
         // We can receive keys from a software keyboard that don't correspond to any existing
         // KEYCODE value. Android will give those to us as an ACTION_MULTIPLE KeyEvent.
         //
@@ -1581,9 +1661,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void toggleKeyboard() {
-        LimeLog.info("Toggling keyboard overlay");
-        InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        inputManager.toggleSoftInput(0, 0);
+        if (keyboardOverlay != null) keyboardOverlay.toggle();
     }
 
     private byte getLiTouchTypeFromEvent(MotionEvent event) {
@@ -1865,6 +1943,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Returns true if the event was consumed
     // NB: View is only present if called from a view callback
     private boolean handleMotionEvent(View view, MotionEvent event) {
+        if (keyboardOverlay != null && !prefConfig.touchscreenTrackpad &&
+                event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) keyboardOverlay.directTouch(true);
+            else if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                streamView.post(() -> keyboardOverlay.directTouch(false));
+            }
+        }
         // Pass through mouse/touch/joystick input if we're not grabbing
         if (!grabbedInput) {
             return false;
@@ -2308,6 +2393,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void stopConnection() {
+        if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         if (connecting || connected) {
             connecting = connected = false;
             updatePipAutoEnter();
@@ -2372,6 +2458,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void connectionTerminated(final int errorCode) {
+        runOnUiThread(() -> {
+            if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
+        });
         if (rotationRestart) {
             return;
         }
@@ -2501,6 +2590,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 }
                 connected = true;
                 connecting = false;
+                if (keyboardOverlay != null) keyboardOverlay.setConnected(true);
                 updatePipAutoEnter();
                 scheduleRotationReconnect();
 

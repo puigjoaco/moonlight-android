@@ -254,16 +254,20 @@ public class RelativeTouchContext implements TouchContext {
                 int deltaX = eventX - lastTouchX;
                 int deltaY = eventY - lastTouchY;
 
-                // Scale the deltas based on the factors passed to our constructor
-                deltaX = (int) Math.round((double) Math.abs(deltaX) * xFactor);
-                deltaY = (int) Math.round((double) Math.abs(deltaY) * yFactor);
+                // Remote desktop packets below use the view dimensions as their reference,
+                // so their deltas must also be in view pixels. Scaling these to 1280x720
+                // first distorts the axes in portrait and loses slow movement to rounding.
+                // Keep upstream sensitivity for game input and two-finger scrolling.
+                if (pointerCount == 2 || !prefConfig.absoluteMouseMode) {
+                    deltaX = (int) Math.round((double) Math.abs(deltaX) * xFactor);
+                    deltaY = (int) Math.round((double) Math.abs(deltaY) * yFactor);
 
-                // Fix up the signs
-                if (eventX < lastTouchX) {
-                    deltaX = -deltaX;
-                }
-                if (eventY < lastTouchY) {
-                    deltaY = -deltaY;
+                    if (eventX < lastTouchX) {
+                        deltaX = -deltaX;
+                    }
+                    if (eventY < lastTouchY) {
+                        deltaY = -deltaY;
+                    }
                 }
 
                 if (pointerCount == 2) {
