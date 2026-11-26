@@ -20,6 +20,7 @@ import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
+import com.limelight.utils.NativeDisplayPolicy;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
@@ -117,6 +118,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private SharedPreferences tombstonePrefs;
 
     private NvConnection conn;
+    private static final String EXTRA_ROTATION_RECONNECT = "RotationReconnect";
+    private boolean nativeResolution;
+    private volatile boolean rotationRestart;
+    private boolean recreatingForRotation;
+    private boolean stopped;
+    private final Handler rotationHandler = new Handler();
+    private final Runnable rotationReconnect = this::reconnectForRotation;
     private SpinnerDialog spinner;
     private boolean displayedFailureDialog = false;
     private boolean connecting = false;
@@ -212,14 +220,35 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         setContentView(R.layout.activity_game);
 
         // Start the spinner
-        spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
-                getResources().getString(R.string.conn_establishing_msg), true);
+        if (!getIntent().getBooleanExtra(EXTRA_ROTATION_RECONNECT, false)) {
+            spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
+                    getResources().getString(R.string.conn_establishing_msg), true);
+        }
 
         // Read the stream preferences
         prefConfig = PreferenceConfiguration.readPreferences(this);
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
 
-        // Enter landscape unless we're on a square screen
+        nativeResolution = PreferenceConfiguration.isNativeResolution(prefConfig.width, prefConfig.height);
+        if (nativeResolution) {
+            // Display.Mode dimensions are panel pixels, unaffected by density and system bars.
+            Display display = getWindowManager().getDefaultDisplay();
+            int width = prefConfig.width;
+            int height = prefConfig.height;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                for (Display.Mode mode : display.getSupportedModes()) {
+                    if ((long) mode.getPhysicalWidth() * mode.getPhysicalHeight() >= (long) width * height) {
+                        width = mode.getPhysicalWidth();
+                        height = mode.getPhysicalHeight();
+                    }
+                }
+            }
+            boolean portrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+            prefConfig.width = NativeDisplayPolicy.width(width, height, portrait);
+            prefConfig.height = NativeDisplayPolicy.height(width, height, portrait);
+        }
+
+        // Native fullscreen follows the device; fixed resolutions retain upstream behavior.
         setPreferredOrientationForCurrentDisplay();
 
         if (prefConfig.stretchVideo || shouldIgnoreInsetsForResolution(prefConfig.width, prefConfig.height)) {
@@ -464,6 +493,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         StreamConfiguration config = new StreamConfiguration.Builder()
                 .setResolution(prefConfig.width, prefConfig.height)
+                .setVirtualDisplayScale(prefConfig.desktopScale)
                 .setLaunchRefreshRate(prefConfig.fps)
                 .setRefreshRate(chosenFrameRate)
                 .setApp(app)
@@ -536,6 +566,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void setPreferredOrientationForCurrentDisplay() {
+        if (nativeResolution) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+            return;
+        }
         Display display = getWindowManager().getDefaultDisplay();
 
         // For semi-square displays, we use more complex logic to determine which orientation to use (if any)
@@ -577,6 +611,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+
+        scheduleRotationReconnect();
 
         // Set requested orientation for possible new screen size
         setPreferredOrientationForCurrentDisplay();
@@ -626,6 +662,48 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 UiHelper.notifyStreamExitingPiP(this);
             }
         }
+    }
+
+    private void scheduleRotationReconnect() {
+        rotationHandler.removeCallbacks(rotationReconnect);
+        if (nativeResolution && !rotationRestart && !stopped) {
+            // Wait for the orientation to settle; rapid rotations coalesce to the latest axis.
+            rotationHandler.postDelayed(rotationReconnect, 250);
+        }
+    }
+
+    private void reconnectForRotation() {
+        if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode())) {
+            return;
+        }
+        boolean portrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+        if (!NativeDisplayPolicy.needsReconnect(prefConfig.width, prefConfig.height, portrait)) {
+            return;
+        }
+
+        LimeLog.info("Reconnecting native stream for " + (portrait ? "portrait" : "landscape"));
+        rotationRestart = true;
+        displayedFailureDialog = true; // Expected local stop must never show a termination dialog.
+        connected = connecting = false;
+        updatePipAutoEnter();
+        setInputGrabState(false);
+        controllerHandler.stop();
+        decoderRenderer.prepareForStop();
+        final NvConnection oldConnection = conn;
+        // Stop only the stream, never /cancel. Recreate after teardown finishes so the
+        // old decoder, controller and native bridge cannot race the replacement.
+        new Thread(() -> {
+            oldConnection.stop();
+            runOnUiThread(() -> {
+                if (!stopped && !isFinishing() && !isDestroyed()) {
+                    getIntent().putExtra(EXTRA_ROTATION_RECONNECT, true);
+                    recreatingForRotation = true;
+                    recreate();
+                    overridePendingTransition(0, 0);
+                }
+            });
+        }, "RotationReconnect").start();
     }
 
     @TargetApi(Build.VERSION_CODES.O)
@@ -1078,6 +1156,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     protected void onStop() {
         super.onStop();
+        stopped = true;
+        rotationHandler.removeCallbacks(rotationReconnect);
 
         SpinnerDialog.closeDialogs(this);
         Dialog.closeDialogs();
@@ -1092,7 +1172,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             displayedFailureDialog = true;
             stopConnection();
 
-            if (prefConfig.enableLatencyToast) {
+            if (prefConfig.enableLatencyToast && !rotationRestart) {
                 int averageEndToEndLat = decoderRenderer.getAverageEndToEndLatency();
                 int averageDecoderLat = decoderRenderer.getAverageDecoderLatency();
                 String message = null;
@@ -1144,7 +1224,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             }
         }
 
-        finish();
+        if (!recreatingForRotation) {
+            finish();
+        }
     }
 
     private void setInputGrabState(boolean grab) {
@@ -2290,6 +2372,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void connectionTerminated(final int errorCode) {
+        if (rotationRestart) {
+            return;
+        }
         // Perform a connection test if the failure could be due to a blocked port
         // This does network I/O, so don't do it on the main thread.
         final int portFlags = MoonBridge.getPortFlagsFromTerminationErrorCode(errorCode);
@@ -2411,9 +2496,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     spinner = null;
                 }
 
+                if (rotationRestart || stopped) {
+                    return;
+                }
                 connected = true;
                 connecting = false;
                 updatePipAutoEnter();
+                scheduleRotationReconnect();
 
                 // Hide the mouse cursor now after a short delay.
                 // Doing it before dismissing the spinner seems to be undone
@@ -2424,7 +2513,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 h.postDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        setInputGrabState(true);
+                        if (connected && !rotationRestart && !stopped) {
+                            setInputGrabState(true);
+                        }
                     }
                 }, 500);
 

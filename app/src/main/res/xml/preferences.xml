@@ -12,6 +12,13 @@
             android:entryValues="@array/resolution_values"
             android:defaultValue="1280x720" />
         <ListPreference
+            android:key="list_desktop_scale"
+            android:title="@string/title_desktop_scale"
+            android:summary="@string/summary_desktop_scale"
+            android:entries="@array/desktop_scale_names"
+            android:entryValues="@array/desktop_scale_values"
+            android:defaultValue="auto" />
+        <ListPreference
             android:key="list_fps"
             android:title="@string/title_fps_list"
             android:summary="@string/summary_fps_list"

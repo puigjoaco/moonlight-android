@@ -8,6 +8,7 @@ import android.preference.PreferenceManager;
 import android.view.Display;
 
 import com.limelight.nvstream.jni.MoonBridge;
+import com.limelight.utils.NativeDisplayPolicy;
 
 public class PreferenceConfiguration {
     public enum FormatOption {
@@ -28,6 +29,7 @@ public class PreferenceConfiguration {
 
     static final String RESOLUTION_PREF_STRING = "list_resolution";
     static final String FPS_PREF_STRING = "list_fps";
+    private static final String DESKTOP_SCALE_PREF_STRING = "list_desktop_scale";
     static final String BITRATE_PREF_STRING = "seekbar_bitrate_kbps";
     private static final String BITRATE_PREF_OLD_STRING = "seekbar_bitrate";
     private static final String STRETCH_PREF_STRING = "checkbox_stretch_video";
@@ -124,6 +126,7 @@ public class PreferenceConfiguration {
 
     public int width, height, fps;
     public int bitrate;
+    public int desktopScale;
     public FormatOption videoFormat;
     public int deadzonePercentage;
     public int oscOpacity;
@@ -541,6 +544,9 @@ public class PreferenceConfiguration {
             // https://cs.android.com/android/_/android/platform/frameworks/base/+/8970010a5e9f3dc5c069f56b4147552accfcbbeb
             prefs.edit().putBoolean(GAMEPAD_MOTION_SENSORS_PREF_STRING, false).apply();
         }
+
+        config.desktopScale = NativeDisplayPolicy.scalePercent(context.getResources().getDisplayMetrics().densityDpi,
+                prefs.getString(DESKTOP_SCALE_PREF_STRING, "auto"));
 
         // This must happen after the preferences migration to ensure the preferences are populated
         config.bitrate = prefs.getInt(BITRATE_PREF_STRING, prefs.getInt(BITRATE_PREF_OLD_STRING, 0) * 1000);

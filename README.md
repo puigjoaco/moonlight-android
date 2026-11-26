@@ -33,3 +33,34 @@ You can follow development on our [Discord server](https://moonlight-stream.org/
 
 Moonlight is the work of students at [Case Western](http://case.edu) and was
 started as a project at [MHacks](http://mhacks.org).
+
+## Native desktop fork
+
+The `nonRootDebug` build installs beside upstream as `com.limelight.puig`, labeled
+**Moonlight Puig**. Select a **Native fullscreen** resolution to follow device
+orientation at native panel pixels. Fixed resolutions retain upstream behavior;
+Android's rotation lock is respected. Landscape/portrait changes are debounced
+for 250 ms, then stop only the stream and quietly recreate the streaming activity
+after teardown. No host-app quit request is sent. A compatible Sunshine host can
+retain its virtual display during the brief reconnect.
+
+Both `/launch` and `/resume` carry the optional HTTPS query parameter
+`virtualDisplayScale`, derived from Android logical density (`densityDpi / 240`)
+and rounded to a 25% step in the 100–400% range. A 600 dpi device therefore uses
+250%, retaining a 576×1248 logical desktop at 1440×3120 physical pixels.
+**Desktop scale** in streaming settings offers **Auto** (the default) or an
+explicit 100–400% override in 25% steps, applied on the next connection.
+Compatible Sunshine uses it only
+for the current virtual output; other hosts ignore it. No native library or
+moonlight-common-c changes are needed.
+
+Build and focused checks (Android SDK 37 / NDK version from `app/build.gradle`):
+
+```sh
+./gradlew testNonRootDebugUnitTest assembleNonRootDebug lintNonRootDebug --no-daemon
+```
+
+APK: `app/build/outputs/apk/nonRoot/debug/app-nonRoot-debug.apk`.
+The JVM tests cover density rounding, native portrait/landscape dimensions, and
+axis-change reconnect policy. Real-device rotation and teardown timing require
+a paired device and a live host check.

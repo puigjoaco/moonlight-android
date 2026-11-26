@@ -14,6 +14,7 @@ public class StreamConfiguration {
     private int width, height;
     private int refreshRate;
     private int launchRefreshRate;
+    private int virtualDisplayScale;
     private int clientRefreshRateX100;
     private int bitrate;
     private boolean sops;
@@ -28,6 +29,10 @@ public class StreamConfiguration {
     private int colorRange;
     private int colorSpace;
     private boolean persistGamepadsAfterDisconnect;
+
+    public int getVirtualDisplayScale() {
+        return virtualDisplayScale;
+    }
 
     public static class Builder {
         private StreamConfiguration config = new StreamConfiguration();
@@ -48,6 +53,11 @@ public class StreamConfiguration {
             return this;
         }
         
+        public StreamConfiguration.Builder setVirtualDisplayScale(int percent) {
+            config.virtualDisplayScale = percent;
+            return this;
+        }
+
         public StreamConfiguration.Builder setRefreshRate(int refreshRate) {
             config.refreshRate = refreshRate;
             return this;
