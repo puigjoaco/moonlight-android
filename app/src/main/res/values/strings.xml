@@ -312,4 +312,12 @@
     <string name="phone_microphone_unsupported">Phone microphone needs an Android 10+ Opus encoder.</string>
     <string name="phone_microphone_failed">Phone microphone unavailable. You can retry from the keys panel.</string>
     <string name="phone_microphone_permission">Allow microphone access to use the phone microphone on the PC.</string>
+    <string name="phone_camera">Camera</string>
+    <string name="phone_camera_on">Turn camera on</string>
+    <string name="phone_camera_off">Turn camera off</string>
+    <string name="phone_camera_facing">Phone camera</string>
+    <string name="phone_camera_front">Front</string>
+    <string name="phone_camera_back">Back</string>
+    <string name="phone_camera_failed">Phone camera unavailable. Retry from the keys panel.</string>
+    <string name="phone_camera_permission">Allow camera access to use the phone camera on the PC.</string>
 </resources>

@@ -12,10 +12,12 @@ public class MicrophonePermissionActivity extends Activity {
     private static final int MICROPHONE_PERMISSION = 7104;
     private static volatile Boolean permissionResult;
 
-    static void requestPermission(Activity activity) {
+    private String permission;
+    static void requestPermission(Activity activity) { requestPermission(activity, Manifest.permission.RECORD_AUDIO); }
+    static void requestPermission(Activity activity, String permission) {
         permissionResult = null;
         // Opening our own permission UI must not count as the user leaving for PiP.
-        activity.startActivity(new Intent(activity, MicrophonePermissionActivity.class)
+        activity.startActivity(new Intent(activity, MicrophonePermissionActivity.class).putExtra("permission", permission)
                 .addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION));
     }
 
@@ -26,13 +28,15 @@ public class MicrophonePermissionActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        permission = getIntent().getStringExtra("permission");
+        if (!Manifest.permission.CAMERA.equals(permission)) permission = Manifest.permission.RECORD_AUDIO;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
-                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
             permissionResult = true;
             finish();
         }
         else if (savedInstanceState == null) {
-            requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, MICROPHONE_PERMISSION);
+            requestPermissions(new String[] {permission}, MICROPHONE_PERMISSION);
         }
     }
 

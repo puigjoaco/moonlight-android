@@ -60,6 +60,18 @@ public final class KeyboardOverlay {
     private final ModifierState modifiers;
     private final List<Button> stateButtons = new ArrayList<>();
     private final List<Runnable> longPressCallbacks = new ArrayList<>();
+    private Runnable cameraToggle;
+    private boolean cameraAvailable, cameraOn;
+    private Button cameraButton;
+    public void setCameraControl(boolean available, boolean on, Runnable toggle) {
+        cameraAvailable = available; cameraOn = on; cameraToggle = toggle;
+        if (cameraButton != null) {
+            cameraButton.setVisibility(available ? View.VISIBLE : View.INVISIBLE);
+            cameraButton.setText(activity.getString(R.string.phone_camera));
+            cameraButton.setContentDescription(activity.getString(on ? R.string.phone_camera_off : R.string.phone_camera_on));
+            cameraButton.setSelected(on); cameraButton.setTextColor(on ? ACCENT : 0xFFFFFFFF);
+        }
+    }
     private Runnable microphoneToggle;
     private boolean microphoneAvailable, microphoneMuted;
     private Button microphoneButton;
@@ -354,7 +366,7 @@ public final class KeyboardOverlay {
         bar.post(this::adaptStrip);
         panel.removeAllViews();
         VirtualKey[][] rows = {
-                {INSERT,HOME,PAGE_UP,null,UP,null}, {DELETE,END,PAGE_DOWN,LEFT,DOWN,RIGHT},
+                {INSERT,HOME,null,null,UP,PAGE_UP}, {DELETE,END,PAGE_DOWN,LEFT,DOWN,RIGHT},
                 {F1,F2,F3,F4,F5,F6}, {F7,F8,F9,F10,F11,F12},
                 {PRINT_SCREEN,SPACE,BACKSPACE,ENTER}
         };
@@ -362,12 +374,18 @@ public final class KeyboardOverlay {
             if (microphoneToggle != null) microphoneToggle.run();
         });
         setMicrophoneControl(microphoneAvailable, microphoneMuted, microphoneToggle);
+        cameraButton = control(activity.getString(R.string.phone_camera), R.string.phone_camera_on, () -> {
+            if (cameraToggle != null) cameraToggle.run();
+        });
+        setCameraControl(cameraAvailable, cameraOn, cameraToggle);
         for (int r = 0; r < rows.length; r++) {
             LinearLayout row = new LinearLayout(activity);
             panel.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
             int column = 0;
             for (VirtualKey key : rows[r]) {
-                row.addView(r == 0 && column++ == 3 ? microphoneButton : key == null ? new View(activity) : keyButton(key),
+                int cell = column++;
+                row.addView(r == 0 && cell == 3 ? microphoneButton : r == 0 && cell == 2 ? cameraButton :
+                                key == null ? new View(activity) : keyButton(key),
                         new LinearLayout.LayoutParams(0, -1, key == SPACE ? 2 : 1));
             }
             if (r == rows.length - 1) row.addView(control("⌄", R.string.keyboard_hide, this::close),

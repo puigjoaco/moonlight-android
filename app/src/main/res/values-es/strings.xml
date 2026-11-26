@@ -291,4 +291,12 @@
     <string name="phone_microphone_unsupported">El micrófono necesita Android 10 o posterior y un codificador Opus.</string>
     <string name="phone_microphone_failed">Micrófono no disponible. Puedes reintentarlo desde el panel de teclas.</string>
     <string name="phone_microphone_permission">Permite el acceso al micrófono para usarlo en el PC.</string>
+    <string name="phone_camera">Cámara</string>
+    <string name="phone_camera_on">Activar cámara</string>
+    <string name="phone_camera_off">Desactivar cámara</string>
+    <string name="phone_camera_facing">Cámara del teléfono</string>
+    <string name="phone_camera_front">Frontal</string>
+    <string name="phone_camera_back">Trasera</string>
+    <string name="phone_camera_failed">Cámara del teléfono no disponible. Puedes reintentar desde el panel de teclas.</string>
+    <string name="phone_camera_permission">Permite el acceso a la cámara para usarla en el PC.</string>
 </resources>

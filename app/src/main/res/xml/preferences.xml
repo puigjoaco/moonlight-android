@@ -136,6 +136,10 @@
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/category_input_settings"
         android:key="category_input_settings">
+        <ListPreference android:key="list_phone_camera_facing"
+            android:title="@string/phone_camera_facing" android:defaultValue="front"
+            android:entries="@array/phone_camera_facing_names" android:entryValues="@array/phone_camera_facing_values"
+            android:summary="%s" />
         <CheckBoxPreference
             android:key="checkbox_phone_microphone"
             android:title="@string/phone_microphone_setting"

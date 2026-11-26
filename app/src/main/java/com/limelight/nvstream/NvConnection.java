@@ -111,6 +111,12 @@ public class NvConnection {
     }
 
     private final java.util.concurrent.atomic.AtomicInteger microphoneSequence = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger cameraSequence = new java.util.concurrent.atomic.AtomicInteger();
+    public boolean supportsCamera() { return MoonBridge.supportsCamera(); }
+    public boolean sendCameraFrame(byte[] frame, boolean key, int rotation, long timestampUs) {
+        return com.limelight.binding.video.CameraPacketizer.send(frame, key, rotation,
+                cameraSequence.getAndIncrement(), timestampUs, MoonBridge::sendCameraChunk);
+    }
     public boolean supportsMicrophone() { return MoonBridge.supportsMicrophone(); }
     public void sendMicrophoneFrame(byte[] opus, long timestampSamples) {
         MoonBridge.sendMicrophoneFrame(opus, microphoneSequence.getAndIncrement(), timestampSamples);

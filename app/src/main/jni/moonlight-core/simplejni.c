@@ -288,3 +288,18 @@ Java_com_limelight_nvstream_jni_MoonBridge_sendMicrophoneFrame(JNIEnv *env, jcla
     if ((*env)->ExceptionCheck(env)) return -1;
     return LiSendMicrophoneFrame(packet, length, sequence, timestamp);
 }
+
+JNIEXPORT jboolean JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_supportsCamera(JNIEnv *env, jclass clazz) {
+    return LiSupportsCamera();
+}
+JNIEXPORT jint JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_sendCameraChunk(JNIEnv *env, jclass clazz, jbyteArray data) {
+    if (data == NULL) return -1;
+    jsize length = (*env)->GetArrayLength(env, data);
+    if (length < 24 || length > 792) return -1;
+    unsigned char packet[792];
+    (*env)->GetByteArrayRegion(env, data, 0, length, (jbyte*)packet);
+    if ((*env)->ExceptionCheck(env)) return -1;
+    return LiSendCameraChunk(packet, length);
+}

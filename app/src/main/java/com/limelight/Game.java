@@ -163,7 +163,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             stopMicrophone(); return;
         }
         if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            if (!microphonePermissionAsked) {
+            if (!microphonePermissionAsked && !cameraPermissionPending) {
                 microphonePermissionAsked = true;
                 microphonePermissionPending = true;
                 suppressPipRefCount++;
@@ -184,6 +184,41 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         getIntent().putExtra("phoneMicrophoneMuted", microphoneMuted);
         microphonePermissionAsked = false;
         refreshMicrophone();
+    }
+    private com.limelight.binding.video.PhoneCamera phoneCamera;
+    private com.limelight.binding.video.CameraState cameraState;
+    private boolean cameraSupported, cameraPermissionPending;
+    private int cameraDisplayDegrees() {
+        switch (getWindowManager().getDefaultDisplay().getRotation()) {
+            case android.view.Surface.ROTATION_90: return 90;
+            case android.view.Surface.ROTATION_180: return 180;
+            case android.view.Surface.ROTATION_270: return 270;
+            default: return 0;
+        }
+    }
+    private void refreshCamera() {
+        if (phoneCamera == null) return;
+        if (keyboardOverlay != null) keyboardOverlay.setCameraControl(connected && cameraSupported, cameraState.requested(), this::toggleCamera);
+        if (!cameraState.shouldCapture(connected, cameraSupported, microphoneForeground, stopped, rotationRestart,
+                Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode())) { stopCamera(); return; }
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (!cameraPermissionPending && !microphonePermissionPending) {
+                cameraPermissionPending = true; suppressPipRefCount++; updatePipAutoEnter();
+                MicrophonePermissionActivity.requestPermission(this, android.Manifest.permission.CAMERA);
+            }
+            return;
+        }
+        boolean front = !"back".equals(android.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                .getString("list_phone_camera_facing", "front"));
+        phoneCamera.start(front);
+    }
+    private void stopCamera() {
+        if (phoneCamera != null) phoneCamera.stop();
+        if (connected && cameraSupported) conn.sendCameraFrame(null, false, 0, 0);
+    }
+    private void toggleCamera() {
+        cameraState.toggle(); getIntent().putExtra("phoneCameraRequested", cameraState.requested());
+        refreshCamera();
     }
     private boolean keyboardBackDown;
     private long lastAbsTouchUpTime = 0;
@@ -592,6 +627,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             Toast.makeText(this, R.string.phone_microphone_failed, Toast.LENGTH_LONG).show();
             refreshMicrophone();
         }));
+        cameraState = new com.limelight.binding.video.CameraState(getIntent().getBooleanExtra("phoneCameraRequested", false));
+        phoneCamera = new com.limelight.binding.video.PhoneCamera(this, conn::sendCameraFrame, this::cameraDisplayDegrees,
+                error -> runOnUiThread(() -> {
+                    LimeLog.warning("Phone camera: " + error.getClass().getSimpleName());
+                    cameraState.off(); getIntent().putExtra("phoneCameraRequested", false);
+                    Toast.makeText(this, R.string.phone_camera_failed, Toast.LENGTH_LONG).show(); refreshCamera();
+                }));
         keyboardOverlay = new KeyboardOverlay(this, streamView, conn, this::sendVirtualKey);
         conn.setInputObserver(new NvConnection.InputObserver() {
             @Override public void nonModifierDown() { keyboardOverlay.modifiers().nonModifierDown(); }
@@ -678,6 +720,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         refreshMicrophone();
+        refreshCamera();
         scheduleRotationReconnect();
 
         // Set requested orientation for possible new screen size
@@ -739,7 +782,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void reconnectForRotation() {
-        if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() || microphonePermissionPending ||
+        if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() || microphonePermissionPending || cameraPermissionPending ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode())) {
             return;
         }
@@ -751,6 +794,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         LimeLog.info("Reconnecting native stream for " + (portrait ? "portrait" : "landscape"));
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         stopMicrophone();
+        stopCamera();
         rotationRestart = true;
         displayedFailureDialog = true; // Expected local stop must never show a termination dialog.
         connected = connecting = false;
@@ -1228,8 +1272,26 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 scheduleRotationReconnect();
             }
         }
+        if (cameraPermissionPending) {
+            Boolean granted = MicrophonePermissionActivity.getPermissionResult();
+            if (granted != null) {
+                cameraPermissionPending = false; suppressPipRefCount--; updatePipAutoEnter();
+                if (!granted) {
+                    cameraState.off(); getIntent().putExtra("phoneCameraRequested", false);
+                    Toast.makeText(this, R.string.phone_camera_permission, Toast.LENGTH_LONG).show();
+                }
+                scheduleRotationReconnect();
+            }
+        }
         refreshMicrophone();
+        refreshCamera();
         if (keyboardOverlay != null) keyboardOverlay.setSuspended(false);
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean inPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(inPictureInPictureMode, newConfig);
+        refreshCamera();
     }
 
     @Override
@@ -1242,6 +1304,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     protected void onPause() {
         microphoneForeground = false;
         stopMicrophone();
+        stopCamera();
         if (keyboardOverlay != null) keyboardOverlay.setSuspended(true);
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
@@ -2461,6 +2524,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     private void stopConnection() {
         stopMicrophone();
+        stopCamera();
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         if (connecting || connected) {
             connecting = connected = false;
@@ -2657,6 +2721,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     return;
                 }
                 connected = true;
+                cameraSupported = conn.supportsCamera();
+                refreshCamera();
                 microphoneSupported = conn.supportsMicrophone();
                 if (microphoneSupported && microphoneEnabled() && !com.limelight.binding.audio.PhoneMicrophone.supported()) {
                     microphoneSupported = false;
