@@ -60,6 +60,20 @@ public final class KeyboardOverlay {
     private final ModifierState modifiers;
     private final List<Button> stateButtons = new ArrayList<>();
     private final List<Runnable> longPressCallbacks = new ArrayList<>();
+    private Runnable microphoneToggle;
+    private boolean microphoneAvailable, microphoneMuted;
+    private Button microphoneButton;
+    /** The mic key shares the panel's existing empty navigation cell. */
+    public void setMicrophoneControl(boolean available, boolean muted, Runnable toggle) {
+        microphoneAvailable = available; microphoneMuted = muted; microphoneToggle = toggle;
+        if (microphoneButton != null) {
+            microphoneButton.setVisibility(available ? View.VISIBLE : View.INVISIBLE);
+            microphoneButton.setText(muted ? "Mic ×" : "Mic");
+            microphoneButton.setContentDescription(activity.getString(muted ? R.string.phone_microphone_unmute : R.string.phone_microphone_mute));
+            microphoneButton.setSelected(!muted);
+            microphoneButton.setTextColor(muted ? 0xFFFFFFFF : ACCENT);
+        }
+    }
     private Mode mode = Mode.CLOSED;
     private boolean connected, suspended, pip, caps, imeSeen, waitingForIme, imeVisible;
     private boolean directTouchActive, pointerUpdateQueued, imeAnimating;
@@ -344,11 +358,16 @@ public final class KeyboardOverlay {
                 {F1,F2,F3,F4,F5,F6}, {F7,F8,F9,F10,F11,F12},
                 {PRINT_SCREEN,SPACE,BACKSPACE,ENTER}
         };
+        microphoneButton = control("Mic", R.string.phone_microphone_mute, () -> {
+            if (microphoneToggle != null) microphoneToggle.run();
+        });
+        setMicrophoneControl(microphoneAvailable, microphoneMuted, microphoneToggle);
         for (int r = 0; r < rows.length; r++) {
             LinearLayout row = new LinearLayout(activity);
             panel.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
+            int column = 0;
             for (VirtualKey key : rows[r]) {
-                row.addView(key == null ? new View(activity) : keyButton(key),
+                row.addView(r == 0 && column++ == 3 ? microphoneButton : key == null ? new View(activity) : keyButton(key),
                         new LinearLayout.LayoutParams(0, -1, key == SPACE ? 2 : 1));
             }
             if (r == rows.length - 1) row.addView(control("⌄", R.string.keyboard_hide, this::close),

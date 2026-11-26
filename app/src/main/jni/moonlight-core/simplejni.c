@@ -273,3 +273,18 @@ Java_com_limelight_nvstream_jni_MoonBridge_guessControllerHasShareButton(JNIEnv 
     // Xbox Series X controllers have a share button
     return SDL_IsJoystickXboxSeriesX(vendorId, productId);
 }
+JNIEXPORT jboolean JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_supportsMicrophone(JNIEnv *env, jclass clazz) {
+    return LiSupportsMicrophone();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_sendMicrophoneFrame(JNIEnv *env, jclass clazz, jbyteArray data, jint sequence, jlong timestamp) {
+    if (data == NULL) return LiSendMicrophoneFrame(NULL, 0, sequence, timestamp);
+    jsize length = (*env)->GetArrayLength(env, data);
+    if (length < 1 || length > 1024) return -1;
+    unsigned char packet[1024];
+    (*env)->GetByteArrayRegion(env, data, 0, length, (jbyte*)packet);
+    if ((*env)->ExceptionCheck(env)) return -1;
+    return LiSendMicrophoneFrame(packet, length, sequence, timestamp);
+}

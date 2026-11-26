@@ -126,6 +126,9 @@ public class MoonBridge {
 
     public static final byte LI_BATTERY_PERCENTAGE_UNKNOWN = (byte)0xFF;
 
+    public static native boolean supportsMicrophone();
+    public static native int sendMicrophoneFrame(byte[] opus, int sequence, long timestampSamples);
+
     private static AudioRenderer audioRenderer;
     private static VideoDecoderRenderer videoRenderer;
     private static NvConnectionListener connectionListener;

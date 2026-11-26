@@ -147,6 +147,44 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private int specialKeyCode = KeyEvent.KEYCODE_UNKNOWN;
     private StreamView streamView;
     private KeyboardOverlay keyboardOverlay;
+    private com.limelight.binding.audio.PhoneMicrophone phoneMicrophone;
+    private boolean microphoneSupported, microphoneForeground, microphonePermissionAsked;
+    private boolean microphonePermissionPending;
+    private boolean microphoneMuted;
+    private boolean microphoneEnabled() {
+        return android.preference.PreferenceManager.getDefaultSharedPreferences(this).getBoolean("checkbox_phone_microphone", true);
+    }
+    private void refreshMicrophone() {
+        if (phoneMicrophone == null) return;
+        boolean enabled = connected && microphoneSupported && microphoneEnabled();
+        if (keyboardOverlay != null) keyboardOverlay.setMicrophoneControl(enabled, microphoneMuted, this::toggleMicrophone);
+        if (!enabled || !microphoneForeground || microphoneMuted || rotationRestart || stopped ||
+                (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode())) {
+            stopMicrophone(); return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (!microphonePermissionAsked) {
+                microphonePermissionAsked = true;
+                microphonePermissionPending = true;
+                suppressPipRefCount++;
+                updatePipAutoEnter();
+                // Game is noHistory, so it cannot receive permission result callbacks.
+                MicrophonePermissionActivity.requestPermission(this);
+            }
+            return;
+        }
+        phoneMicrophone.start();
+    }
+    private void stopMicrophone() {
+        if (phoneMicrophone != null) phoneMicrophone.stop();
+        if (connected && microphoneSupported) conn.sendMicrophoneFrame(null, 0);
+    }
+    private void toggleMicrophone() {
+        microphoneMuted = !microphoneMuted;
+        getIntent().putExtra("phoneMicrophoneMuted", microphoneMuted);
+        microphonePermissionAsked = false;
+        refreshMicrophone();
+    }
     private boolean keyboardBackDown;
     private long lastAbsTouchUpTime = 0;
     private long lastAbsTouchDownTime = 0;
@@ -546,6 +584,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             virtualController.show();
         }
 
+        microphoneMuted = getIntent().getBooleanExtra("phoneMicrophoneMuted", false);
+        phoneMicrophone = new com.limelight.binding.audio.PhoneMicrophone(conn::sendMicrophoneFrame, error -> runOnUiThread(() -> {
+            LimeLog.warning("Phone microphone: " + error.getClass().getSimpleName());
+            microphoneMuted = true;
+            getIntent().putExtra("phoneMicrophoneMuted", true);
+            Toast.makeText(this, R.string.phone_microphone_failed, Toast.LENGTH_LONG).show();
+            refreshMicrophone();
+        }));
         keyboardOverlay = new KeyboardOverlay(this, streamView, conn, this::sendVirtualKey);
         conn.setInputObserver(new NvConnection.InputObserver() {
             @Override public void nonModifierDown() { keyboardOverlay.modifiers().nonModifierDown(); }
@@ -631,6 +677,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             keyboardOverlay.configurationChanged(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode());
         }
 
+        refreshMicrophone();
         scheduleRotationReconnect();
 
         // Set requested orientation for possible new screen size
@@ -692,7 +739,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void reconnectForRotation() {
-        if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() ||
+        if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() || microphonePermissionPending ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode())) {
             return;
         }
@@ -703,6 +750,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         LimeLog.info("Reconnecting native stream for " + (portrait ? "portrait" : "landscape"));
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
+        stopMicrophone();
         rotationRestart = true;
         displayedFailureDialog = true; // Expected local stop must never show a termination dialog.
         connected = connecting = false;
@@ -1164,6 +1212,23 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     protected void onResume() {
         super.onResume();
+        microphoneForeground = true;
+        if (microphonePermissionPending) {
+            Boolean granted = MicrophonePermissionActivity.getPermissionResult();
+            if (granted != null) {
+                microphonePermissionPending = false;
+                suppressPipRefCount--;
+                updatePipAutoEnter();
+                if (!granted) {
+                    microphoneMuted = true;
+                    getIntent().putExtra("phoneMicrophoneMuted", true);
+                    Toast.makeText(this, R.string.phone_microphone_permission, Toast.LENGTH_LONG).show();
+                }
+                // A rotation while the prompt was open must reconnect only after its result.
+                scheduleRotationReconnect();
+            }
+        }
+        refreshMicrophone();
         if (keyboardOverlay != null) keyboardOverlay.setSuspended(false);
     }
 
@@ -1175,6 +1240,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     protected void onPause() {
+        microphoneForeground = false;
+        stopMicrophone();
         if (keyboardOverlay != null) keyboardOverlay.setSuspended(true);
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
@@ -2393,6 +2460,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void stopConnection() {
+        stopMicrophone();
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         if (connecting || connected) {
             connecting = connected = false;
@@ -2589,6 +2657,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     return;
                 }
                 connected = true;
+                microphoneSupported = conn.supportsMicrophone();
+                if (microphoneSupported && microphoneEnabled() && !com.limelight.binding.audio.PhoneMicrophone.supported()) {
+                    microphoneSupported = false;
+                    Toast.makeText(Game.this, R.string.phone_microphone_unsupported, Toast.LENGTH_LONG).show();
+                }
+                refreshMicrophone();
                 connecting = false;
                 if (keyboardOverlay != null) keyboardOverlay.setConnected(true);
                 updatePipAutoEnter();

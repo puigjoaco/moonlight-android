@@ -306,4 +306,10 @@
     <string name="title_desktop_scale">Desktop scale</string>
     <string name="summary_desktop_scale">%s</string>
     <string name="desktop_scale_auto">Auto</string>
+    <string name="phone_microphone_setting">Use phone microphone on the PC</string>
+    <string name="phone_microphone_mute">Mute microphone</string>
+    <string name="phone_microphone_unmute">Unmute microphone</string>
+    <string name="phone_microphone_unsupported">Phone microphone needs an Android 10+ Opus encoder.</string>
+    <string name="phone_microphone_failed">Phone microphone unavailable. You can retry from the keys panel.</string>
+    <string name="phone_microphone_permission">Allow microphone access to use the phone microphone on the PC.</string>
 </resources>

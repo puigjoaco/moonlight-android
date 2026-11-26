@@ -137,6 +137,10 @@
     <PreferenceCategory android:title="@string/category_input_settings"
         android:key="category_input_settings">
         <CheckBoxPreference
+            android:key="checkbox_phone_microphone"
+            android:title="@string/phone_microphone_setting"
+            android:defaultValue="true" />
+        <CheckBoxPreference
             android:key="checkbox_keyboard_button"
             android:title="@string/keyboard_button_setting"
             android:defaultValue="true" />

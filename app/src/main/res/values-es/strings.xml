@@ -285,4 +285,10 @@
     <string name="title_seekbar_vibrate_fallback_strength">Ajustar la intensidad del ruido emulado</string>
     <string name="summary_seekbar_vibrate_fallback_strength">Amplifica o reduce la intensidad de la vibración de tu dispositivo</string>
     <string name="suffix_seekbar_vibrate_fallback_strength">%</string>
+    <string name="phone_microphone_setting">Usar el micrófono del celular en el PC</string>
+    <string name="phone_microphone_mute">Silenciar micrófono</string>
+    <string name="phone_microphone_unmute">Activar micrófono</string>
+    <string name="phone_microphone_unsupported">El micrófono necesita Android 10 o posterior y un codificador Opus.</string>
+    <string name="phone_microphone_failed">Micrófono no disponible. Puedes reintentarlo desde el panel de teclas.</string>
+    <string name="phone_microphone_permission">Permite el acceso al micrófono para usarlo en el PC.</string>
 </resources>

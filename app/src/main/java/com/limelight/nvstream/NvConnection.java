@@ -110,6 +110,12 @@ public class NvConnection {
         return new SecureRandom().nextInt();
     }
 
+    private final java.util.concurrent.atomic.AtomicInteger microphoneSequence = new java.util.concurrent.atomic.AtomicInteger();
+    public boolean supportsMicrophone() { return MoonBridge.supportsMicrophone(); }
+    public void sendMicrophoneFrame(byte[] opus, long timestampSamples) {
+        MoonBridge.sendMicrophoneFrame(opus, microphoneSequence.getAndIncrement(), timestampSamples);
+    }
+
     public void stop() {
         inputSender.close(); // Join before native teardown or a replacement session can start.
         // Interrupt any pending connection. This is thread-safe.
