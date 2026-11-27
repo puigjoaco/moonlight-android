@@ -35,7 +35,9 @@ public class ComputerDatabaseManagerTest {
                     "INSERT INTO Computers VALUES('test-device','Test"
                         + " computer','{}','00:00:00:00:00:01',X'010203')");
             ComputerDatabaseManager.migrateLastUsed(db);
+            ComputerDatabaseManager.migrateRemoteAddressPinned(db);
             ComputerDatabaseManager.migrateLastUsed(db);
+            ComputerDatabaseManager.migrateRemoteAddressPinned(db);
             try (Cursor row = db.rawQuery("SELECT * FROM Computers", null)) {
                 assertTrue(row.moveToFirst());
                 assertEquals("test-device", row.getString(0));
@@ -44,6 +46,7 @@ public class ComputerDatabaseManagerTest {
                 assertEquals("00:00:00:00:00:01", row.getString(3));
                 assertArrayEquals(new byte[] {1, 2, 3}, row.getBlob(4));
                 assertEquals(0, row.getLong(5));
+                assertEquals(0, row.getInt(6));
                 assertFalse(row.moveToNext());
             }
         }
@@ -112,6 +115,59 @@ public class ComputerDatabaseManagerTest {
         assertEquals(c.remoteAddress, saved.remoteAddress);
         assertEquals(manual.manualAddress, saved.manualAddress);
         assertEquals(1, db.getAllComputers().size());
+        db.close();
+    }
+
+    @Test public void pinnedRemoteSurvivesReopenAndAutomaticHostAndPortChanges() {
+        ComputerDatabaseManager db = new ComputerDatabaseManager(context);
+        ComputerDetails c = host();
+        c.localAddress = new ComputerDetails.AddressTuple("192.168.4.27", 47989);
+        c.manualAddress = new ComputerDetails.AddressTuple("desktop.example.ts.net", 47989);
+        c.lastUsed = 1234;
+        db.updateComputer(c);
+        ComputerDetails.AddressTuple pinned = new ComputerDetails.AddressTuple("203.0.113.10", 48089);
+        assertTrue(db.setRemoteAddress(c.uuid, pinned));
+        db.close();
+        db = new ComputerDatabaseManager(context);
+        ComputerDetails update = host();
+        update.remoteAddress = new ComputerDetails.AddressTuple("203.0.113.11", 47989);
+        update.externalPort = 47989;
+        db.updateComputer(update);
+        ComputerDetails saved = db.getComputerByUUID(c.uuid);
+        assertTrue(saved.remoteAddressPinned);
+        assertEquals(pinned, saved.remoteAddress);
+        assertEquals(c.localAddress, saved.localAddress);
+        assertEquals(c.manualAddress, saved.manualAddress);
+        assertEquals(1234, saved.lastUsed);
+        db.close();
+    }
+
+    @Test public void clearingPinPersistsAndStalePollCannotRepinIt() {
+        ComputerDatabaseManager db = new ComputerDatabaseManager(context);
+        ComputerDetails c = host();
+        db.updateComputer(c);
+        db.setRemoteAddress(c.uuid, new ComputerDetails.AddressTuple("203.0.113.10", 48089));
+        ComputerDetails stale = db.getComputerByUUID(c.uuid);
+        assertTrue(db.setRemoteAddress(c.uuid, null));
+        db.updateComputer(stale);
+        db.close();
+        db = new ComputerDatabaseManager(context);
+        assertFalse(db.getComputerByUUID(c.uuid).remoteAddressPinned);
+        assertNull(db.getComputerByUUID(c.uuid).remoteAddress);
+        c.remoteAddress = new ComputerDetails.AddressTuple("203.0.113.11", 47989);
+        db.updateComputer(c);
+        assertEquals(c.remoteAddress, db.getComputerByUUID(c.uuid).remoteAddress);
+        db.close();
+    }
+
+    @Test public void remoteConfigurationCannotCreateADeletedHost() {
+        ComputerDatabaseManager db = new ComputerDatabaseManager(context);
+        ComputerDetails c = host();
+        db.updateComputer(c);
+        db.deleteComputer(c);
+        assertFalse(db.setRemoteAddress(c.uuid, new ComputerDetails.AddressTuple("203.0.113.10", 47989)));
+        assertFalse(db.setRemoteAddress(c.uuid, null));
+        assertTrue(db.getAllComputers().isEmpty());
         db.close();
     }
 

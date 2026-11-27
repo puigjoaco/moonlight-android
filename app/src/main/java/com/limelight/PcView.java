@@ -434,8 +434,9 @@ public class PcView extends AppCompatActivity {
         menu.getMenu().add(0, 1, 0, R.string.porta_pair_again);
         if (ComputerPresentation.hasMac(c)) menu.getMenu().add(0, 2, 1, R.string.porta_wake);
         menu.getMenu().add(0, 3, 2, R.string.porta_rename);
-        menu.getMenu().add(0, 4, 3, R.string.porta_remove);
-        menu.getMenu().add(0, 5, 4, R.string.porta_apps);
+        menu.getMenu().add(0, 6, 3, R.string.porta_remote_address);
+        menu.getMenu().add(0, 4, 4, R.string.porta_remove);
+        menu.getMenu().add(0, 5, 5, R.string.porta_apps);
         menu.setOnMenuItemClickListener(
                 item -> {
                     switch (item.getItemId()) {
@@ -461,10 +462,83 @@ public class PcView extends AppCompatActivity {
                         case 5:
                             doAppList(c, false, true);
                             break;
+                        case 6:
+                            showRemoteAddress(c);
+                            break;
                     }
                     return true;
                 });
         menu.show();
+    }
+
+    private void showRemoteAddress(ComputerDetails c) {
+        ComputerDetails current = getComputer(c.uuid);
+        if (current == null) return;
+        TextInputLayout field = new TextInputLayout(this);
+        field.setHint(getString(R.string.porta_remote_address_hint));
+        TextInputEditText input = new TextInputEditText(field.getContext());
+        input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        if (current.remoteAddress != null) input.setText(current.remoteAddress.toString());
+        field.addView(input);
+        field.setPadding(dp(this, 24), dp(this, 8), dp(this, 24), 0);
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.porta_remote_address)
+                .setView(field)
+                .setNegativeButton(R.string.porta_cancel, null)
+                .setPositiveButton(R.string.porta_save, null);
+        if (current.remoteAddress != null) builder.setNeutralButton(R.string.porta_remove, null);
+        androidx.appcompat.app.AlertDialog dialog = builder.create();
+        dialog.setOnShowListener(d -> {
+            TextView title = dialog.findViewById(androidx.appcompat.R.id.alertTitle);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && title != null) {
+                title.setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_BALANCED);
+            }
+            dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(v -> {
+                try {
+                    ComputerDetails.AddressTuple address = RemoteAddress.parse(input.getText().toString());
+                    saveRemoteAddress(c.uuid, address, dialog, field);
+                } catch (RemoteAddress.InvalidAddressException e) {
+                    field.setError(getString(e.localAddress
+                            ? R.string.porta_remote_address_public
+                            : R.string.porta_remote_address_invalid));
+                }
+            });
+            if (current.remoteAddress != null) {
+                dialog.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener(
+                        v -> saveRemoteAddress(c.uuid, null, dialog, field));
+            }
+        });
+        input.requestFocus();
+        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        dialog.show();
+    }
+
+    private void saveRemoteAddress(String uuid, ComputerDetails.AddressTuple address,
+            androidx.appcompat.app.AlertDialog dialog, TextInputLayout field) {
+        final ComputerManagerService.ComputerManagerBinder binder = managerBinder;
+        if (binder == null) {
+            field.setError(getString(R.string.porta_remote_address_save_failed));
+            return;
+        }
+        field.setError(null);
+        dialog.setCancelable(false);
+        for (int button : new int[]{DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE,
+                DialogInterface.BUTTON_NEUTRAL}) dialog.getButton(button).setEnabled(false);
+        new Thread(() -> {
+            boolean saved = binder.setRemoteAddress(uuid, address);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (saved) dialog.dismiss();
+                else {
+                    dialog.setCancelable(true);
+                    for (int button : new int[]{DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE,
+                            DialogInterface.BUTTON_NEUTRAL}) dialog.getButton(button).setEnabled(true);
+                    field.setError(getString(R.string.porta_remote_address_save_failed));
+                }
+            });
+        }, "Save Internet address").start();
     }
 
     private void rename(ComputerDetails c) {

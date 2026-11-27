@@ -41,6 +41,7 @@ public class ComputerDatabaseManager {
     private static final String MAC_ADDRESS_COLUMN_NAME = "MacAddress";
     private static final String SERVER_CERT_COLUMN_NAME = "ServerCert";
 
+    static final String REMOTE_ADDRESS_PINNED_COLUMN_NAME = "RemoteAddressPinned";
     static final String LAST_USED_COLUMN_NAME = "LastUsed";
     private SQLiteDatabase computerDb;
 
@@ -68,6 +69,7 @@ public class ComputerDatabaseManager {
                 ADDRESSES_COLUMN_NAME, MAC_ADDRESS_COLUMN_NAME, SERVER_CERT_COLUMN_NAME));
 
         migrateLastUsed(computerDb);
+        migrateRemoteAddressPinned(computerDb);
 
         // Move all computers from the old DB (if any) to the new one
         List<ComputerDetails> oldComputers = LegacyDatabaseReader.migrateAllComputers(c);
@@ -100,6 +102,50 @@ public class ComputerDatabaseManager {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
+        }
+    }
+
+    /** Same additive migration as LastUsed; old entries remain automatically discovered. */
+    static void migrateRemoteAddressPinned(SQLiteDatabase db) {
+        db.beginTransaction();
+        try {
+            boolean found = false;
+            try (Cursor cursor = db.rawQuery("PRAGMA table_info(Computers)", null)) {
+                while (cursor.moveToNext()) {
+                    if (REMOTE_ADDRESS_PINNED_COLUMN_NAME.equals(cursor.getString(cursor.getColumnIndexOrThrow("name")))) {
+                        found = true;
+                    }
+                }
+            }
+            if (!found) db.execSQL("ALTER TABLE Computers ADD COLUMN RemoteAddressPinned INTEGER NOT NULL DEFAULT 0");
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** Explicit configuration only: never contacts the host or creates a deleted computer. */
+    public synchronized boolean setRemoteAddress(String uuid, ComputerDetails.AddressTuple address) {
+        ComputerDetails saved = getComputerByUUID(uuid);
+        if (saved == null) return false;
+        saved.remoteAddress = address;
+        ContentValues values = new ContentValues();
+        values.put(ADDRESSES_COLUMN_NAME, addressesToJson(saved));
+        values.put(REMOTE_ADDRESS_PINNED_COLUMN_NAME, address != null ? 1 : 0);
+        return computerDb.update(COMPUTER_TABLE_NAME, values, COMPUTER_UUID_COLUMN_NAME + "=?",
+                new String[]{uuid}) == 1;
+    }
+
+    private static String addressesToJson(ComputerDetails details) {
+        try {
+            JSONObject addresses = new JSONObject();
+            addresses.put(AddressFields.LOCAL, tupleToJson(details.localAddress));
+            addresses.put(AddressFields.REMOTE, tupleToJson(details.remoteAddress));
+            addresses.put(AddressFields.MANUAL, tupleToJson(details.manualAddress));
+            addresses.put(AddressFields.IPv6, tupleToJson(details.ipv6Address));
+            return addresses.toString();
+        } catch (JSONException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -142,23 +188,22 @@ public class ComputerDatabaseManager {
             // A discovery/manual-add result may only contain one of the known routes.
             // Merge inside the transaction so an overlapping poll cannot erase the others.
             if (saved != null) {
+                ComputerDetails.AddressTuple savedRemote = saved.remoteAddress;
+                boolean pinned = saved.remoteAddressPinned;
+                boolean stalePinnedResult = details.remoteAddressPinned;
                 saved.update(details);
+                // Only setRemoteAddress changes configuration on an existing host. In particular,
+                // an older poll must not restore a pin that the user has just cleared.
+                saved.remoteAddressPinned = pinned;
+                if (pinned || stalePinnedResult) saved.remoteAddress = savedRemote;
                 details = saved;
             }
             values.put(LAST_USED_COLUMN_NAME, Math.max(details.lastUsed, saved == null ? 0 : saved.lastUsed));
             values.put(COMPUTER_UUID_COLUMN_NAME, details.uuid);
             values.put(COMPUTER_NAME_COLUMN_NAME, details.name);
 
-            try {
-                JSONObject addresses = new JSONObject();
-                addresses.put(AddressFields.LOCAL, tupleToJson(details.localAddress));
-                addresses.put(AddressFields.REMOTE, tupleToJson(details.remoteAddress));
-                addresses.put(AddressFields.MANUAL, tupleToJson(details.manualAddress));
-                addresses.put(AddressFields.IPv6, tupleToJson(details.ipv6Address));
-                values.put(ADDRESSES_COLUMN_NAME, addresses.toString());
-            } catch (JSONException e) {
-                throw new RuntimeException(e);
-            }
+            values.put(REMOTE_ADDRESS_PINNED_COLUMN_NAME, details.remoteAddressPinned ? 1 : 0);
+            values.put(ADDRESSES_COLUMN_NAME, addressesToJson(details));
 
             values.put(MAC_ADDRESS_COLUMN_NAME, details.macAddress);
             try {
@@ -183,6 +228,7 @@ public class ComputerDatabaseManager {
     private ComputerDetails getComputerFromCursor(Cursor c) {
         ComputerDetails details = new ComputerDetails();
 
+        details.remoteAddressPinned = c.getInt(c.getColumnIndexOrThrow(REMOTE_ADDRESS_PINNED_COLUMN_NAME)) != 0;
         details.lastUsed = c.getLong(c.getColumnIndexOrThrow(LAST_USED_COLUMN_NAME));
         details.uuid = c.getString(0);
         details.name = c.getString(1);

@@ -133,6 +133,11 @@ public class ComputerManagerService extends Service {
                 return false;
             }
 
+            if (existingComputer != null) {
+                details.remoteAddressPinned = existingComputer.remoteAddressPinned;
+                if (existingComputer.remoteAddressPinned) details.remoteAddress = existingComputer.remoteAddress;
+            }
+
             // Refresh even for saved hosts: residential public addresses can change, and
             // a previous STUN failure must not leave a LAN-only entry forever.
             refreshExternalAddress(details);
@@ -290,6 +295,11 @@ public class ComputerManagerService extends Service {
             return null;
         }
 
+        /** Local configuration only; call off the UI thread because a poll may hold the lock. */
+        public boolean setRemoteAddress(String uuid, ComputerDetails.AddressTuple address) {
+            return ComputerManagerService.this.setRemoteAddress(uuid, address);
+        }
+
         public void invalidateStateForComputer(String uuid) {
             synchronized (pollingTuples) {
                 for (PollingTuple tuple : pollingTuples) {
@@ -302,6 +312,49 @@ public class ComputerManagerService extends Service {
                     }
                 }
             }
+        }
+    }
+
+    boolean setRemoteAddress(String uuid, ComputerDetails.AddressTuple address) {
+        if (!getLocalDatabaseReference()) return false;
+        try {
+            PollingTuple tuple = null;
+            synchronized (pollingTuples) {
+                for (PollingTuple candidate : pollingTuples) {
+                    if (uuid.equals(candidate.computer.uuid)) {
+                        tuple = candidate;
+                        break;
+                    }
+                }
+            }
+            if (tuple == null) return false;
+            synchronized (tuple.networkLock) {
+                if (!dbManager.setRemoteAddress(uuid, address)) return false;
+                ComputerDetails computer = tuple.computer;
+                ComputerDetails.AddressTuple previous = computer.remoteAddress;
+                computer.remoteAddress = address;
+                computer.remoteAddressPinned = address != null;
+                computer.externalPort = address == null ? 0 : address.port;
+                // Do not keep connecting to an Internet endpoint the user replaced or removed.
+                if (previous != null && previous.equals(computer.activeAddress)
+                        && !previous.equals(computer.localAddress)
+                        && !previous.equals(computer.manualAddress)
+                        && !previous.equals(computer.ipv6Address)
+                        && !previous.equals(address)) {
+                    computer.activeAddress = null;
+                    computer.state = ComputerDetails.State.UNKNOWN;
+                }
+                defaultNetworkLock.lock();
+                try {
+                    nextExternalAddressRefresh.keySet().removeIf(key -> key.startsWith(uuid + "@"));
+                } finally {
+                    defaultNetworkLock.unlock();
+                }
+                if (listener != null) listener.notifyComputerUpdated(computer);
+                return true;
+            }
+        } finally {
+            releaseLocalDatabaseReference();
         }
     }
 
@@ -332,7 +385,7 @@ public class ComputerManagerService extends Service {
 
     /** Only STUN through the actual on-link LAN, never through cellular or a VPN exit. */
     void refreshExternalAddress(ComputerDetails details) {
-        if (details.activeAddress == null) return;
+        if (details.remoteAddressPinned || details.activeAddress == null) return;
         final InetAddress host;
         try {
             host = InetAddress.getByName(details.activeAddress.address);

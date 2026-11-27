@@ -64,6 +64,8 @@ public class ComputerDetails {
     public String name;
     public AddressTuple localAddress;
     public AddressTuple remoteAddress;
+    /** A user-specified Internet route; discovery must not replace its host or port. */
+    public boolean remoteAddressPinned;
     public AddressTuple manualAddress;
     public AddressTuple ipv6Address;
     public String macAddress;
@@ -142,10 +144,14 @@ public class ComputerDetails {
                 && !isTailscaleAddress(details.localAddress.address)) {
             this.localAddress = details.localAddress;
         }
-        if (details.remoteAddress != null) {
+        if (details.remoteAddressPinned && details.remoteAddress != null) {
+            this.remoteAddress = details.remoteAddress;
+            this.remoteAddressPinned = true;
+        }
+        else if (!this.remoteAddressPinned && details.remoteAddress != null) {
             this.remoteAddress = details.remoteAddress;
         }
-        else if (this.remoteAddress != null && details.externalPort != 0) {
+        else if (!this.remoteAddressPinned && this.remoteAddress != null && details.externalPort != 0) {
             // If we have a remote address already (perhaps via STUN) but our updated details
             // don't have a new one (because GFE doesn't send one), propagate the external
             // port to the current remote address. We may have tried to guess it previously.

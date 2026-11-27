@@ -195,4 +195,76 @@ public class ComputerRoutesTest {
                 .when(service).tryPollIp(any(), any());
         assertEquals(c.remoteAddress, service.parallelPollPc(c).activeAddress);
     }
+    @Test public void pinnedAddressAndPortSurviveServerUpdatesAndSkipStun() {
+        ComputerDetails c = host();
+        c.remoteAddress = new AddressTuple("203.0.113.10", 48089);
+        c.remoteAddressPinned = true;
+        ComputerDetails response = host();
+        response.remoteAddress = new AddressTuple("203.0.113.11", 47989);
+        response.externalPort = 47989;
+        c.update(response);
+        response.remoteAddress = null;
+        c.update(response);
+        service.refreshExternalAddress(c);
+        assertEquals(new AddressTuple("203.0.113.10", 48089), c.remoteAddress);
+        assertTrue(c.remoteAddressPinned);
+        ComputerDetails copied = new ComputerDetails(c);
+        assertTrue(copied.remoteAddressPinned);
+        assertEquals(c.remoteAddress, copied.remoteAddress);
+        verify(service, never()).findExternalAddress();
+    }
+
+    @Test public void offlineAddressCanBeSavedAndClearedWithoutPollingHost() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        context.deleteDatabase("computers4.db");
+        ComputerDatabaseManager db = new ComputerDatabaseManager(context);
+        try {
+            ComputerDetails c = host();
+            c.state = ComputerDetails.State.OFFLINE;
+            db.updateComputer(c);
+            ReflectionHelpers.setField(service, "dbManager", db);
+            ((AtomicInteger)ReflectionHelpers.getField(service, "dbRefCount")).set(1);
+            ReflectionHelpers.callInstanceMethod(service, "addTuple",
+                    ReflectionHelpers.ClassParameter.from(ComputerDetails.class, c));
+            AddressTuple address = new AddressTuple("203.0.113.10", 48089);
+            assertTrue(service.setRemoteAddress(c.uuid, address));
+            assertEquals(address, c.remoteAddress);
+            assertTrue(c.remoteAddressPinned);
+            assertEquals(address, db.getComputerByUUID(c.uuid).remoteAddress);
+            assertTrue(db.getComputerByUUID(c.uuid).remoteAddressPinned);
+            verify(service, never()).tryPollIp(any(), any());
+            verify(service, never()).findExternalAddress();
+            assertTrue(service.setRemoteAddress(c.uuid, null));
+            assertNull(c.remoteAddress);
+            assertFalse(c.remoteAddressPinned);
+            service.refreshExternalAddress(c);
+            assertEquals(new AddressTuple("203.0.113.10", 47989), c.remoteAddress);
+            assertFalse(db.getComputerByUUID(c.uuid).remoteAddressPinned);
+        } finally {
+            db.close();
+        }
+    }
+
+    @Test public void clearingLearnedAddressResetsStunRefreshDelay() {
+        Context context = RuntimeEnvironment.getApplication();
+        context.deleteDatabase("computers4.db");
+        ComputerDatabaseManager db = new ComputerDatabaseManager(context);
+        try {
+            ComputerDetails c = host();
+            service.refreshExternalAddress(c);
+            db.updateComputer(c);
+            ReflectionHelpers.setField(service, "dbManager", db);
+            ((AtomicInteger)ReflectionHelpers.getField(service, "dbRefCount")).set(1);
+            ReflectionHelpers.callInstanceMethod(service, "addTuple",
+                    ReflectionHelpers.ClassParameter.from(ComputerDetails.class, c));
+            assertTrue(service.setRemoteAddress(c.uuid, null));
+            doReturn("203.0.113.11").when(service).findExternalAddress();
+            service.refreshExternalAddress(c);
+            assertEquals(new AddressTuple("203.0.113.11", 47989), c.remoteAddress);
+            verify(service, times(2)).findExternalAddress();
+        } finally {
+            db.close();
+        }
+    }
+
 }

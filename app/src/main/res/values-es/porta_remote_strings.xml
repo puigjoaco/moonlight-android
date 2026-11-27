@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="porta_internet">Internet</string>
+    <string name="porta_remote_address">Dirección desde fuera de casa</string>
+    <string name="porta_remote_address_hint">Dirección (puerto opcional)</string>
+    <string name="porta_remote_address_invalid">Escribe una dirección y un puerto válidos (1–65535)</string>
+    <string name="porta_remote_address_public">Usa una dirección pública</string>
+    <string name="porta_remote_address_save_failed">No se pudo guardar la dirección</string>
 </resources>
