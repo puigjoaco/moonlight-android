@@ -69,6 +69,7 @@ public class NvConnection {
     private LimelightCryptoProvider cryptoProvider;
     private String uniqueId;
     private ConnectionContext context;
+    private volatile NvHTTP streamHttp;
     private static Semaphore connectionAllowed = new Semaphore(1);
     private final boolean isMonkey;
     private final Context appContext;
@@ -120,6 +121,19 @@ public class NvConnection {
     public boolean supportsMicrophone() { return MoonBridge.supportsMicrophone(); }
     public void sendMicrophoneFrame(byte[] opus, long timestampSamples) {
         MoonBridge.sendMicrophoneFrame(opus, microphoneSequence.getAndIncrement(), timestampSamples);
+    }
+
+    /** Notify only the deliberate orientation reconnect before native control teardown. */
+    public void stopForRotation() {
+        try {
+            NvHTTP http = streamHttp;
+            if (http != null) http.prepareRotationReconnect(context.riKey.getEncoded());
+        } catch (IOException e) {
+            // Old hosts and an unreachable network still get ordinary bounded cleanup.
+            LimeLog.info("Rotation reconnect hint unavailable");
+        } finally {
+            stop();
+        }
     }
 
     public void stop() {
@@ -259,6 +273,7 @@ public class NvConnection {
     private boolean startApp() throws XmlPullParserException, IOException
     {
         NvHTTP h = new NvHTTP(context.serverAddress, context.httpsPort, uniqueId, context.serverCert, cryptoProvider);
+        streamHttp = h; // Reuse its resolved HTTPS port; stopping never needs discovery.
 
         String serverInfo = h.getServerInfo(true);
         

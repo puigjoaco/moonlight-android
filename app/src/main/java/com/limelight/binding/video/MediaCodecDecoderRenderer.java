@@ -1026,6 +1026,9 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                             int lastIndex = outIndex;
 
                             numFramesOut++;
+                            if (numFramesOut == 1) {
+                                LimeLog.info("First decoded video frame at uptime " + SystemClock.uptimeMillis() + " ms");
+                            }
 
                             // Render the latest frame now if frame pacing isn't in balanced mode
                             if (prefs.framePacing != PreferenceConfiguration.FRAME_PACING_BALANCED) {
@@ -1407,6 +1410,10 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                             (float)lastTwo.totalHostProcessingLatency / 10 / lastTwo.framesWithHostProcessingLatency)).append('\n');
                 }
                 sb.append(context.getString(R.string.perf_overlay_dectime, decodeTimeMs));
+                if (BuildConfig.DEBUG) {
+                    // Retain the overlay samples for repeatable adb measurements without screenshots.
+                    LimeLog.info("Video stats: " + sb.toString().replace('\n', ';'));
+                }
                 perfListener.onPerfUpdate(sb.toString());
             }
 

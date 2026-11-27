@@ -271,7 +271,8 @@ public class StreamSettings extends Activity {
             prefs.edit()
                     .putInt(PreferenceConfiguration.BITRATE_PREF_STRING,
                             PreferenceConfiguration.getDefaultBitrate(
-                                    PreferenceConfiguration.resolveResolution(getActivity(), res), fps))
+                                    PreferenceConfiguration.resolveResolution(getActivity(), res),
+                                    PreferenceConfiguration.resolveFrameRate(getActivity(), fps)))
                     .apply();
         }
 

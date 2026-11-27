@@ -73,7 +73,7 @@ public class PreferenceConfiguration {
     private static final String GAMEPAD_MOTION_FALLBACK_PREF_STRING = "checkbox_gamepad_motion_fallback";
 
     static final String DEFAULT_RESOLUTION = "native_fullscreen";
-    static final String DEFAULT_FPS = "60";
+    static final String DEFAULT_FPS = "native";
     private static final boolean DEFAULT_STRETCH = false;
     private static final boolean DEFAULT_SOPS = true;
     private static final boolean DEFAULT_DISABLE_TOASTS = false;
@@ -348,7 +348,32 @@ public class PreferenceConfiguration {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         return getDefaultBitrate(
                 resolveResolution(context, prefs.getString(RESOLUTION_PREF_STRING, DEFAULT_RESOLUTION)),
-                prefs.getString(FPS_PREF_STRING, DEFAULT_FPS));
+                resolveFrameRate(context, prefs.getString(FPS_PREF_STRING, DEFAULT_FPS)));
+    }
+
+    /** Resolve Auto each launch while preserving all saved numeric frame rates. */
+    static String resolveFrameRate(Context context, String value) {
+        if (!DEFAULT_FPS.equals(value)) {
+            return value;
+        }
+        Display display = ((WindowManager) context.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+        float refreshRate = display.getRefreshRate();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            android.graphics.Point pixels = NativeDisplayPolicy.fullscreenPixels(display);
+            refreshRate = 0;
+            for (Display.Mode mode : display.getSupportedModes()) {
+                // Native streams use the largest panel mode. Don't request 120 FPS when
+                // the panel can only reach that rate after reducing its resolution.
+                if (Math.max(mode.getPhysicalWidth(), mode.getPhysicalHeight()) == pixels.x &&
+                        Math.min(mode.getPhysicalWidth(), mode.getPhysicalHeight()) == pixels.y) {
+                    refreshRate = Math.max(refreshRate, mode.getRefreshRate());
+                }
+            }
+            if (refreshRate == 0) {
+                refreshRate = display.getMode().getRefreshRate();
+            }
+        }
+        return Integer.toString(refreshRate >= 1 && refreshRate <= 1000 ? Math.round(refreshRate) : 60);
     }
 
     static String getNativeFullscreenResolution(Context context) {
@@ -548,7 +573,8 @@ public class PreferenceConfiguration {
 
             config.width = PreferenceConfiguration.getWidthFromResolutionString(resStr);
             config.height = PreferenceConfiguration.getHeightFromResolutionString(resStr);
-            config.fps = Integer.parseInt(prefs.getString(FPS_PREF_STRING, PreferenceConfiguration.DEFAULT_FPS));
+            config.fps = Integer.parseInt(resolveFrameRate(context,
+                    prefs.getString(FPS_PREF_STRING, PreferenceConfiguration.DEFAULT_FPS)));
         }
 
         if (!prefs.contains(SMALL_ICONS_PREF_STRING)) {

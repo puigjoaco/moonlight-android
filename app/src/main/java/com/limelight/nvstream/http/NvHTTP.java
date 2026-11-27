@@ -819,6 +819,17 @@ public class NvHTTP {
         }
     }
     
+    /** Best-effort, bounded hint: ordinary stops never request host reconnect grace. */
+    public void prepareRotationReconnect(byte[] launchKey) throws IOException {
+        if (httpsPort == 0) return; // Never do unbounded port discovery while stopping.
+        OkHttpClient client = httpClientShortConnectTimeout.newBuilder()
+                .callTimeout(1, TimeUnit.SECONDS).build();
+        try (ResponseBody body = openHttpConnection(client, getHttpsUrl(true),
+                "rotation-reconnect", "rikey=" + bytesToHex(launchKey))) {
+            body.string();
+        }
+    }
+
     public boolean quitApp() throws IOException, XmlPullParserException {
         String xmlStr = openHttpConnectionToString(httpClientLongConnectNoReadTimeout, getHttpsUrl(true), "cancel");
         if (getXmlString(xmlStr, "cancel", true).equals("0")) {

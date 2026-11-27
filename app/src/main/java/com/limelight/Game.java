@@ -874,7 +874,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // Stop only the stream, never /cancel. Recreate after teardown finishes so the
         // old decoder, controller and native bridge cannot race the replacement.
         new Thread(() -> {
-            oldConnection.stop();
+            oldConnection.stopForRotation();
             runOnUiThread(() -> {
                 if (!stopped && !isFinishing() && !isDestroyed()) {
                     getIntent().putExtra(EXTRA_ROTATION_RECONNECT, true);
