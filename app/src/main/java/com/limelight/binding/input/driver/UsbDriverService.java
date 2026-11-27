@@ -17,6 +17,7 @@ import android.os.IBinder;
 import android.view.InputDevice;
 import android.widget.Toast;
 
+import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
 import com.limelight.R;
 import com.limelight.preferences.PreferenceConfiguration;
@@ -27,7 +28,7 @@ import java.util.ArrayList;
 public class UsbDriverService extends Service implements UsbDriverListener {
 
     private static final String ACTION_USB_PERMISSION =
-            "com.limelight.USB_PERMISSION";
+            BuildConfig.APPLICATION_ID + ".USB_PERMISSION";
 
     private UsbManager usbManager;
     private PreferenceConfiguration prefConfig;

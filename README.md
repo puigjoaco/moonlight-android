@@ -36,8 +36,8 @@ started as a project at [MHacks](http://mhacks.org).
 
 ## Native desktop fork
 
-The `nonRootDebug` build installs beside upstream as `com.limelight.puig`, labeled
-**Moonlight Puig**. Select a **Native fullscreen** resolution to follow device
+The `nonRootDebug` build installs beside upstream as `app.porta`, labeled
+**Porta**. Select a **Native fullscreen** resolution to follow device
 orientation at native panel pixels. Fixed resolutions retain upstream behavior;
 Android's rotation lock is respected. Landscape/portrait changes are debounced
 for 250 ms, then stop only the stream and quietly recreate the streaming activity

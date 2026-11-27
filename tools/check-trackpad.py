@@ -47,9 +47,9 @@ def main():
         raise RuntimeError("The selected phone is not available")
     # Refuse to swipe a different application accidentally. No UI dump is saved.
     focus = run(adb, "-s", args.serial, "shell", "dumpsys", "window", "windows")
-    if not any("mCurrentFocus=" in line and "com.limelight.puig/" in line and
+    if not any("mCurrentFocus=" in line and "app.porta/" in line and
                ("/com.limelight.Game" in line or "/.Game" in line) for line in focus.splitlines()):
-        raise RuntimeError("Moonlight Puig's stream activity is not focused; open the stream manually")
+        raise RuntimeError("Porta's stream activity is not focused; open the stream manually")
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
     positions = queue.Queue()
