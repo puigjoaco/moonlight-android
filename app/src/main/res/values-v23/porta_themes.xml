@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.Porta" parent="Theme.Porta.Base">
+        <item name="android:windowLightStatusBar">@bool/porta_is_light</item>
+    </style>
+</resources>

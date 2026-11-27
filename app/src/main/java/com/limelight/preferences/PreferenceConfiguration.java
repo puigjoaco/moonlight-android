@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.preference.PreferenceManager;
 import android.view.Display;
+import android.view.WindowManager;
 
 import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.utils.NativeDisplayPolicy;
@@ -71,7 +72,7 @@ public class PreferenceConfiguration {
     private static final String GAMEPAD_MOTION_SENSORS_PREF_STRING = "checkbox_gamepad_motion_sensors";
     private static final String GAMEPAD_MOTION_FALLBACK_PREF_STRING = "checkbox_gamepad_motion_fallback";
 
-    static final String DEFAULT_RESOLUTION = "1280x720";
+    static final String DEFAULT_RESOLUTION = "native_fullscreen";
     static final String DEFAULT_FPS = "60";
     private static final boolean DEFAULT_STRETCH = false;
     private static final boolean DEFAULT_SOPS = true;
@@ -103,7 +104,7 @@ public class PreferenceConfiguration {
     private static final String DEFAULT_AUDIO_CONFIG = "2"; // Stereo
     private static final boolean DEFAULT_LATENCY_TOAST = false;
     private static final String DEFAULT_FRAME_PACING = "latency";
-    private static final boolean DEFAULT_ABSOLUTE_MOUSE_MODE = false;
+    private static final boolean DEFAULT_ABSOLUTE_MOUSE_MODE = true;
     private static final boolean DEFAULT_ENABLE_AUDIO_FX = false;
     private static final boolean DEFAULT_REDUCE_REFRESH_RATE = false;
     private static final boolean DEFAULT_FULL_RANGE = false;
@@ -125,6 +126,7 @@ public class PreferenceConfiguration {
     public static final String RES_NATIVE = "Native";
 
     public int width, height, fps;
+    public boolean nativeResolution;
     public int bitrate;
     public int desktopScale;
     public FormatOption videoFormat;
@@ -345,8 +347,25 @@ public class PreferenceConfiguration {
     public static int getDefaultBitrate(Context context) {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         return getDefaultBitrate(
-                prefs.getString(RESOLUTION_PREF_STRING, DEFAULT_RESOLUTION),
+                resolveResolution(context, prefs.getString(RESOLUTION_PREF_STRING, DEFAULT_RESOLUTION)),
                 prefs.getString(FPS_PREF_STRING, DEFAULT_FPS));
+    }
+
+    static String getNativeFullscreenResolution(Context context) {
+        Display display = ((WindowManager) context.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+        android.graphics.Point pixels = NativeDisplayPolicy.fullscreenPixels(display);
+        return pixels.x + "x" + pixels.y;
+    }
+
+    public static boolean microphoneEnabled(Context context, String uuid) {
+        boolean defaultEnabled = PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean("checkbox_phone_microphone", true);
+        return context.getSharedPreferences("porta_home", Context.MODE_PRIVATE)
+                .getBoolean("mic_" + uuid, defaultEnabled);
+    }
+
+    static String resolveResolution(Context context, String resolution) {
+        return DEFAULT_RESOLUTION.equals(resolution) ? getNativeFullscreenResolution(context) : resolution;
     }
 
     private static FormatOption getVideoFormatValue(Context context) {
@@ -518,6 +537,8 @@ public class PreferenceConfiguration {
         else {
             // Use the new preference location
             String resStr = prefs.getString(RESOLUTION_PREF_STRING, PreferenceConfiguration.DEFAULT_RESOLUTION);
+            config.nativeResolution = DEFAULT_RESOLUTION.equals(resStr);
+            resStr = resolveResolution(context, resStr);
 
             // Convert legacy resolution strings to the new style
             if (!resStr.contains("x")) {

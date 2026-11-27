@@ -86,7 +86,18 @@ public class NvHTTP {
     private X509KeyManager keyManager;
     private X509Certificate serverCert;
 
-    void setServerCert(X509Certificate serverCert) {
+    private volatile boolean requestsCancelled;
+
+    /** A pairing attempt owns one instance; cancellation stays latched for its lifetime. */
+    public synchronized void cancelPendingRequests() {
+        requestsCancelled = true;
+        httpClientLongConnectTimeout.dispatcher().cancelAll();
+        httpClientLongConnectNoReadTimeout.dispatcher().cancelAll();
+        httpClientShortConnectTimeout.dispatcher().cancelAll();
+    }
+
+    synchronized void setServerCert(X509Certificate serverCert) throws IOException {
+        if (requestsCancelled) throw new IOException("Pairing cancelled");
         this.serverCert = serverCert;
     }
 
@@ -173,6 +184,12 @@ public class NvHTTP {
         };
 
         httpClientLongConnectTimeout = new OkHttpClient.Builder()
+                .addInterceptor(chain -> {
+                    // Interceptors run after dispatcher registration: cancellation either
+                    // rejects this call here or cancels it through the dispatcher below.
+                    if (requestsCancelled) throw new IOException("Pairing cancelled");
+                    return chain.proceed(chain.request());
+                })
                 .connectionPool(new ConnectionPool(0, 1, TimeUnit.MILLISECONDS))
                 .hostnameVerifier(hv)
                 .readTimeout(READ_TIMEOUT, TimeUnit.MILLISECONDS)

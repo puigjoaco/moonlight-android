@@ -1,0 +1,12 @@
+<resources>
+    <style name="TextAppearance.Porta.DialogTitle" parent="TextAppearance.Porta.DialogTitle.Base">
+        <item name="android:textStyle">normal</item>
+        <item name="android:textFontWeight">600</item>
+        <item name="android:lineHeight">32sp</item>
+    </style>
+    <!-- AppCompat DialogTitle reads these from the widget style, not TextAppearance. -->
+    <style name="Widget.Porta.MaterialAlertDialog.Title.Text" parent="Widget.Porta.MaterialAlertDialog.Title.Text.Base">
+        <item name="android:textFontWeight">600</item>
+        <item name="android:lineHeight">32sp</item>
+    </style>
+</resources>

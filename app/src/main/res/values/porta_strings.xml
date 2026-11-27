@@ -1,0 +1,57 @@
+<resources>
+    <string name="porta_pair">Pair</string>
+    <string name="porta_pair_title">Pair a computer</string>
+    <string name="porta_pin_title">Enter this PIN on %1$s</string>
+    <string name="porta_waiting">Waiting</string>
+    <string name="porta_pair_failed">Couldn’t pair</string>
+    <string name="porta_retry">Retry</string>
+    <string name="porta_cancel">Cancel</string>
+    <string name="porta_add">Add</string>
+    <string name="porta_add_address">Add by name or IP</string>
+    <string name="porta_host">Name or IP</string>
+    <string name="porta_connect">Connect</string>
+    <string name="porta_wake">Wake</string>
+    <string name="porta_wake_host">Wake %1$s</string>
+    <string name="porta_offline">Offline</string>
+    <string name="porta_unpaired">Not paired</string>
+    <string name="porta_online">Online</string>
+    <string name="porta_refreshing">Refreshing</string>
+    <string name="porta_local">Local network</string>
+    <string name="porta_tailscale">Tailscale</string>
+    <string name="porta_remote">Remote network</string>
+    <string name="porta_never_used">Never used</string>
+    <string name="porta_just_now">Just now</string>
+    <string name="porta_minutes_ago">%1$d min ago</string>
+    <string name="porta_hours_ago">%1$d h ago</string>
+    <string name="porta_yesterday">Yesterday</string>
+    <string name="porta_settings">Settings</string>
+    <string name="porta_more">More options</string>
+    <string name="porta_mic">Microphone</string>
+    <string name="porta_camera">Camera</string>
+    <string name="porta_active">On</string>
+    <string name="porta_off">Off</string>
+    <string name="porta_pair_again">Pair again</string>
+    <string name="porta_rename">Rename</string>
+    <string name="porta_remove">Remove</string>
+    <string name="porta_apps">Applications</string>
+    <string name="porta_name">Name</string>
+    <string name="porta_save">Save</string>
+    <string name="porta_empty">No computers yet</string>
+    <string name="porta_desktop_missing">Desktop is unavailable. Open Applications from More options.</string>
+    <string name="porta_connect_failed">Couldn’t connect</string>
+    <string name="porta_mic_denied">Microphone permission denied</string>
+    <string name="porta_remove_confirm">Remove %1$s?</string>
+    <string name="porta_latency">%1$d ms</string>
+    <string name="porta_measuring">Measuring…</string>
+    <string name="porta_latency_unknown">Latency unavailable</string>
+    <string name="porta_used_just_now">used just now</string>
+    <string name="porta_used_at">used %1$s</string>
+    <plurals name="porta_used_minutes_ago">
+        <item quantity="one">used %1$d minute ago</item>
+        <item quantity="other">used %1$d minutes ago</item>
+    </plurals>
+    <plurals name="porta_used_hours_ago">
+        <item quantity="one">used %1$d hour ago</item>
+        <item quantity="other">used %1$d hours ago</item>
+    </plurals>
+</resources>

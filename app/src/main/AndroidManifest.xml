@@ -93,6 +93,7 @@
 
         <activity
             android:name=".PcView"
+            android:theme="@style/Theme.Porta"
             android:exported="true"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
@@ -131,6 +132,7 @@
         </activity>
         <activity
             android:name=".preferences.StreamSettings"
+            android:theme="@style/Theme.Porta"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
@@ -140,6 +142,7 @@
         </activity>
         <activity
             android:name=".preferences.AddComputerManually"
+            android:theme="@style/Theme.Porta.AddComputer"
             android:resizeableActivity="true"
             android:windowSoftInputMode="stateVisible"
             android:enableOnBackInvokedCallback="true"

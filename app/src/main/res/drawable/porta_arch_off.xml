@@ -1,0 +1,1 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="64dp" android:height="88dp" android:viewportWidth="64" android:viewportHeight="88"><path android:pathData="M1,87V32A31,31 0,0 1,63 32V87Z" android:fillColor="@color/porta_surface_container_high" android:strokeColor="@color/porta_outline_variant" android:strokeWidth="1"/></vector>

@@ -151,8 +151,21 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean microphoneSupported, microphoneForeground, microphonePermissionAsked;
     private boolean microphonePermissionPending;
     private boolean microphoneMuted;
+    // Game is shared by Desktop, Applications, shortcuts and rotation reconnects.
+    void recordComputerUsed() {
+        String uuid = getIntent().getStringExtra(EXTRA_PC_UUID);
+        if (uuid == null) return;
+        com.limelight.computers.ComputerDatabaseManager db =
+                new com.limelight.computers.ComputerDatabaseManager(this);
+        try {
+            db.markUsed(uuid, System.currentTimeMillis());
+        } finally {
+            db.close();
+        }
+    }
+
     private boolean microphoneEnabled() {
-        return android.preference.PreferenceManager.getDefaultSharedPreferences(this).getBoolean("checkbox_phone_microphone", true);
+        return PreferenceConfiguration.microphoneEnabled(this, getIntent().getStringExtra(EXTRA_PC_UUID));
     }
     private void refreshMicrophone() {
         if (phoneMicrophone == null) return;
@@ -303,21 +316,17 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Read the stream preferences
         prefConfig = PreferenceConfiguration.readPreferences(this);
+        recordComputerUsed();
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
 
-        nativeResolution = PreferenceConfiguration.isNativeResolution(prefConfig.width, prefConfig.height);
+        nativeResolution = prefConfig.nativeResolution || PreferenceConfiguration.isNativeResolution(prefConfig.width, prefConfig.height);
         if (nativeResolution) {
-            // Display.Mode dimensions are panel pixels, unaffected by density and system bars.
-            Display display = getWindowManager().getDefaultDisplay();
+            android.graphics.Point pixels = NativeDisplayPolicy.fullscreenPixels(getWindowManager().getDefaultDisplay());
             int width = prefConfig.width;
             int height = prefConfig.height;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                for (Display.Mode mode : display.getSupportedModes()) {
-                    if ((long) mode.getPhysicalWidth() * mode.getPhysicalHeight() >= (long) width * height) {
-                        width = mode.getPhysicalWidth();
-                        height = mode.getPhysicalHeight();
-                    }
-                }
+            if ((long) pixels.x * pixels.y >= (long) width * height) {
+                width = pixels.x;
+                height = pixels.y;
             }
             boolean portrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
             prefConfig.width = NativeDisplayPolicy.width(width, height, portrait);
@@ -792,6 +801,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         LimeLog.info("Reconnecting native stream for " + (portrait ? "portrait" : "landscape"));
+        cancelTouchContexts();
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         stopMicrophone();
         stopCamera();
@@ -954,7 +964,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     private boolean shouldIgnoreInsetsForResolution(int width, int height) {
         // Never ignore insets for non-native resolutions
-        if (!PreferenceConfiguration.isNativeResolution(width, height)) {
+        if (!prefConfig.nativeResolution && !PreferenceConfiguration.isNativeResolution(width, height)) {
             return false;
         }
 
@@ -986,7 +996,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // On M, we can explicitly set the optimal display mode
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode bestMode = display.getMode();
-            boolean isNativeResolutionStream = PreferenceConfiguration.isNativeResolution(prefConfig.width, prefConfig.height);
+            boolean isNativeResolutionStream = nativeResolution;
             boolean refreshRateIsGood = isRefreshRateGoodMatch(bestMode.getRefreshRate());
             boolean refreshRateIsEqual = isRefreshRateEqualMatch(bestMode.getRefreshRate());
 
@@ -1302,6 +1312,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     protected void onPause() {
+        cancelTouchContexts();
         microphoneForeground = false;
         stopMicrophone();
         stopCamera();
@@ -2522,7 +2533,16 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void stageComplete(String stage) {
     }
 
+    private void cancelTouchContexts() {
+        for (TouchContext context : touchContextMap) {
+            if (context != null) {
+                context.cancelTouch();
+            }
+        }
+    }
+
     private void stopConnection() {
+        cancelTouchContexts();
         stopMicrophone();
         stopCamera();
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
@@ -2591,6 +2611,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     public void connectionTerminated(final int errorCode) {
         runOnUiThread(() -> {
+            cancelTouchContexts();
             if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         });
         if (rotationRestart) {

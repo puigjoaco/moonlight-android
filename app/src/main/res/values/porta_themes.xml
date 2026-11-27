@@ -1,0 +1,91 @@
+<resources>
+    <style name="Theme.Porta.Base" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/porta_primary</item>
+        <item name="colorOnPrimary">@color/porta_on_primary</item>
+        <item name="colorPrimaryContainer">@color/porta_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/porta_on_primary_container</item>
+        <item name="colorSecondary">@color/porta_secondary</item>
+        <item name="colorOnSecondary">@color/porta_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/porta_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/porta_on_secondary_container</item>
+        <item name="colorTertiary">@color/porta_tertiary</item>
+        <item name="colorOnTertiary">@color/porta_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/porta_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/porta_on_tertiary_container</item>
+        <item name="colorSurface">@color/porta_surface</item>
+        <item name="colorOnSurface">@color/porta_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/porta_on_surface_variant</item>
+        <item name="colorSurfaceDim">@color/porta_surface_dim</item>
+        <item name="colorSurfaceBright">@color/porta_surface_bright</item>
+        <item name="colorSurfaceContainerLowest">@color/porta_surface_container_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/porta_surface_container_low</item>
+        <item name="colorSurfaceContainer">@color/porta_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/porta_surface_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/porta_surface_container_highest</item>
+        <item name="colorOutline">@color/porta_outline</item>
+        <item name="colorOutlineVariant">@color/porta_outline_variant</item>
+        <item name="colorError">@color/porta_error</item>
+        <item name="colorOnError">@color/porta_on_error</item>
+        <item name="colorErrorContainer">@color/porta_error_container</item>
+        <item name="colorOnErrorContainer">@color/porta_on_error_container</item>
+        <item name="colorSurfaceInverse">@color/porta_inverse_surface</item>
+        <item name="colorOnSurfaceInverse">@color/porta_inverse_on_surface</item>
+        <item name="colorPrimaryInverse">@color/porta_inverse_primary</item>
+        <item name="android:backgroundDimAmount">@dimen/porta_scrim_amount</item>
+        <item name="android:colorAccent">@color/porta_primary</item>
+        <item name="android:textColorPrimary">@color/porta_on_surface</item>
+        <item name="android:textColorSecondary">@color/porta_on_surface_variant</item>
+        <item name="android:colorControlActivated">@color/porta_primary</item>
+        <item name="android:colorBackground">@color/porta_background</item>
+        <item name="android:windowBackground">@color/porta_background</item>
+        <item name="android:statusBarColor">@color/porta_background</item>
+        <item name="android:navigationBarColor">@color/porta_background</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Porta.MaterialAlertDialog</item>
+        <item name="textInputStyle">@style/Widget.Porta.TextInputLayout.FilledBox</item>
+        <item name="fontFamily">@font/inter</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="shapeAppearanceCornerLarge">@style/ShapeAppearance.Porta.Large</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Porta.ExtraLarge</item>
+    </style>
+    <style name="Theme.Porta" parent="Theme.Porta.Base"/>
+    <style name="ShapeAppearance.Porta.Large" parent="ShapeAppearance.Material3.Corner.Large">
+        <item name="cornerSize">16dp</item>
+    </style>
+    <style name="ShapeAppearance.Porta.ExtraLarge" parent="ShapeAppearance.Material3.Corner.ExtraLarge">
+        <item name="cornerSize">28dp</item>
+    </style>
+    <style name="ThemeOverlay.Porta.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="materialAlertDialogTitleTextStyle">@style/Widget.Porta.MaterialAlertDialog.Title.Text</item>
+        <item name="textInputStyle">@style/Widget.Porta.TextInputLayout.FilledBox</item>
+    </style>
+    <style name="Widget.Porta.MaterialAlertDialog.Title.Text.Base" parent="MaterialAlertDialog.Material3.Title.Text">
+        <item name="android:textAppearance">@style/TextAppearance.Porta.DialogTitle</item>
+        <item name="android:singleLine">false</item>
+        <item name="android:maxLines">10</item>
+        <item name="android:scrollHorizontally">false</item>
+    </style>
+    <style name="Widget.Porta.MaterialAlertDialog.Title.Text" parent="Widget.Porta.MaterialAlertDialog.Title.Text.Base"/>
+    <style name="TextAppearance.Porta.DialogTitle.Base" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="fontFamily">@font/inter</item>
+        <item name="android:fontFamily">@font/inter</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">24sp</item>
+        <item name="lineHeight">32sp</item>
+        <item name="android:textColor">@color/porta_on_surface</item>
+    </style>
+    <style name="TextAppearance.Porta.DialogTitle" parent="TextAppearance.Porta.DialogTitle.Base"/>
+    <style name="Widget.Porta.TextInputLayout.FilledBox" parent="Widget.Material3.TextInputLayout.FilledBox">
+        <item name="boxBackgroundMode">filled</item>
+        <item name="boxBackgroundColor">@color/porta_surface_container_highest</item>
+        <item name="boxCornerRadiusTopStart">4dp</item>
+        <item name="boxCornerRadiusTopEnd">4dp</item>
+        <item name="boxCornerRadiusBottomStart">0dp</item>
+        <item name="boxCornerRadiusBottomEnd">0dp</item>
+    </style>
+    <style name="Theme.Porta.AddComputer" parent="Theme.Porta">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

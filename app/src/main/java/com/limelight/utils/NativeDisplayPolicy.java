@@ -1,12 +1,34 @@
 package com.limelight.utils;
 
-/** Pure policy shared by native fullscreen launch and rotation reconnects. */
+/** Display policy shared by preferences, native fullscreen launch and rotation reconnects. */
 public final class NativeDisplayPolicy {
     private NativeDisplayPolicy() {}
 
-    /** Desktop density uses a 240 dpi baseline, rounded to 25% steps. */
+    /** Largest panel mode, normalized to landscape for preferences and Game alike. */
+    public static android.graphics.Point fullscreenPixels(android.view.Display display) {
+        int width, height;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            android.view.Display.Mode active = display.getMode();
+            width = active.getPhysicalWidth();
+            height = active.getPhysicalHeight();
+            for (android.view.Display.Mode mode : display.getSupportedModes()) {
+                if ((long) mode.getPhysicalWidth() * mode.getPhysicalHeight() > (long) width * height) {
+                    width = mode.getPhysicalWidth();
+                    height = mode.getPhysicalHeight();
+                }
+            }
+        } else {
+            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+            display.getRealMetrics(metrics);
+            width = metrics.widthPixels;
+            height = metrics.heightPixels;
+        }
+        return new android.graphics.Point(Math.max(width, height), Math.min(width, height));
+    }
+
+    /** Desktop density uses a 300 dpi baseline, rounded to 25% steps. */
     public static int scalePercent(int densityDpi) {
-        return Math.max(100, Math.min(400, Math.round(densityDpi / 60.0f) * 25));
+        return Math.max(100, Math.min(400, Math.round(densityDpi / 75.0f) * 25));
     }
 
     /** A saved explicit scale overrides Auto only when it matches a supported choice. */

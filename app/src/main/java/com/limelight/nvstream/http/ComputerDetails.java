@@ -58,6 +58,8 @@ public class ComputerDetails {
     }
 
     // Persistent attributes
+    /** UTC epoch milliseconds of the last launched session, or zero if never used. */
+    public long lastUsed;
     public String uuid;
     public String name;
     public AddressTuple localAddress;
@@ -109,6 +111,7 @@ public class ComputerDetails {
     }
 
     public void update(ComputerDetails details) {
+        this.lastUsed = Math.max(this.lastUsed, details.lastUsed);
         this.state = details.state;
         this.name = details.name;
         this.uuid = details.uuid;

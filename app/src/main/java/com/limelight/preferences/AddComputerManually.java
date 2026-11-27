@@ -38,8 +38,9 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public class AddComputerManually extends Activity {
+public class AddComputerManually extends androidx.appcompat.app.AppCompatActivity {
     private TextView hostText;
+    private boolean bound;
     private ComputerManagerService.ComputerManagerBinder managerBinder;
     private final LinkedBlockingQueue<String> computersToAdd = new LinkedBlockingQueue<>();
     private Thread addThread;
@@ -258,10 +259,8 @@ public class AddComputerManually extends Activity {
     protected void onDestroy() {
         super.onDestroy();
 
-        if (managerBinder != null) {
-            joinAddThread();
-            unbindService(serviceConnection);
-        }
+        joinAddThread();
+        if (bound) unbindService(serviceConnection);
     }
 
     @Override
@@ -270,41 +269,42 @@ public class AddComputerManually extends Activity {
 
         UiHelper.setLocale(this);
 
-        setContentView(R.layout.activity_add_computer_manually);
-
-        UiHelper.notifyNewRootView(this);
-
-        this.hostText = findViewById(R.id.hostTextView);
-        hostText.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        hostText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView textView, int actionId, KeyEvent keyEvent) {
-                if (actionId == EditorInfo.IME_ACTION_DONE ||
-                        (keyEvent != null &&
-                                keyEvent.getAction() == KeyEvent.ACTION_DOWN &&
-                                keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                    return handleDoneEvent();
-                }
-                else if (actionId == EditorInfo.IME_ACTION_PREVIOUS) {
-                    // This is how the Fire TV dismisses the keyboard
-                    InputMethodManager imm = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-                    imm.hideSoftInputFromWindow(hostText.getWindowToken(), 0);
-                    return false;
-                }
-
-                return false;
-            }
+        com.google.android.material.textfield.TextInputLayout field = new com.google.android.material.textfield.TextInputLayout(this);
+        field.setHint(getString(R.string.porta_host));
+        com.google.android.material.textfield.TextInputEditText input = new com.google.android.material.textfield.TextInputEditText(field.getContext());
+        input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        input.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        field.addView(input);
+        int margin = Math.round(24 * getResources().getDisplayMetrics().density);
+        field.setPadding(margin, margin / 3, margin, 0);
+        hostText = input;
+        androidx.appcompat.app.AlertDialog addDialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.porta_add_address).setView(field)
+                .setNegativeButton(R.string.porta_cancel, (d, w) -> finish())
+                .setPositiveButton(R.string.porta_add, null).create();
+        addDialog.setOnCancelListener(d -> finish());
+        addDialog.setOnShowListener(d -> {
+            addDialog.getButton(-1).setEnabled(!input.getText().toString().trim().isEmpty());
+            addDialog.getButton(-1).setOnClickListener(v -> handleDoneEvent());
         });
-
-        findViewById(R.id.addPcButton).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                handleDoneEvent();
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (addDialog.isShowing()) addDialog.getButton(-1).setEnabled(!s.toString().trim().isEmpty());
             }
+            @Override public void afterTextChanged(android.text.Editable s) {}
+        });
+        input.requestFocus();
+        addDialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        addDialog.show();
+        input.setOnEditorActionListener((v, action, event) -> {
+            if (action == EditorInfo.IME_ACTION_DONE) { handleDoneEvent(); return true; }
+            return false;
         });
 
         // Bind to the ComputerManager service
-        bindService(new Intent(AddComputerManually.this,
+        bound = bindService(new Intent(AddComputerManually.this,
                     ComputerManagerService.class), serviceConnection, Service.BIND_AUTO_CREATE);
     }
 
@@ -317,7 +317,7 @@ public class AddComputerManually extends Activity {
             return true;
         }
 
-        computersToAdd.add(hostAddress);
+        if (computersToAdd.isEmpty()) computersToAdd.add(hostAddress);
         return false;
     }
 }

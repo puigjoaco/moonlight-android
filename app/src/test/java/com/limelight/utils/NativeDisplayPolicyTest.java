@@ -6,10 +6,12 @@ import static org.junit.Assert.*;
 public class NativeDisplayPolicyTest {
     @Test public void densityIsRoundedAndBounded() {
         assertEquals(100, NativeDisplayPolicy.scalePercent(240));
-        assertEquals(250, NativeDisplayPolicy.scalePercent(600));
-        assertEquals(250, NativeDisplayPolicy.scalePercent(629));
-        assertEquals(275, NativeDisplayPolicy.scalePercent(630));
-        assertEquals(200, NativeDisplayPolicy.scalePercent(480));
+        assertEquals(200, NativeDisplayPolicy.scalePercent(600));
+        assertEquals(200, NativeDisplayPolicy.scalePercent(637));
+        assertEquals(225, NativeDisplayPolicy.scalePercent(638));
+        assertEquals(150, NativeDisplayPolicy.scalePercent(480));
+        assertEquals(100, NativeDisplayPolicy.scalePercent(300));
+        assertEquals(125, NativeDisplayPolicy.scalePercent(360));
         assertEquals(100, NativeDisplayPolicy.scalePercent(0));
         assertEquals(100, NativeDisplayPolicy.scalePercent(160));
         assertEquals(400, NativeDisplayPolicy.scalePercent(1200));
@@ -19,13 +21,13 @@ public class NativeDisplayPolicyTest {
         for (int percent = 100; percent <= 400; percent += 25) {
             assertEquals(percent, NativeDisplayPolicy.scalePercent(600, Integer.toString(percent)));
         }
-        assertEquals(250, NativeDisplayPolicy.scalePercent(600, "auto"));
-        assertEquals(200, NativeDisplayPolicy.scalePercent(480, "auto"));
+        assertEquals(200, NativeDisplayPolicy.scalePercent(600, "auto"));
+        assertEquals(150, NativeDisplayPolicy.scalePercent(480, "auto"));
     }
 
     @Test public void invalidSavedScalesFallBackToAuto() {
         for (String value : new String[] {null, "", "bogus", "0", "99", "401", "110", "250%", "999999999999"}) {
-            assertEquals(250, NativeDisplayPolicy.scalePercent(600, value));
+            assertEquals(200, NativeDisplayPolicy.scalePercent(600, value));
         }
     }
 

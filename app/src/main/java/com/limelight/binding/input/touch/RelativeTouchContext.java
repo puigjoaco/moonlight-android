@@ -2,6 +2,7 @@ package com.limelight.binding.input.touch;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.View;
 
 import com.limelight.nvstream.NvConnection;
@@ -11,6 +12,7 @@ import com.limelight.preferences.PreferenceConfiguration;
 public class RelativeTouchContext implements TouchContext {
     private int lastTouchX = 0;
     private int lastTouchY = 0;
+    private int lastMotionX, lastMotionY;
     private int originalTouchX = 0;
     private int originalTouchY = 0;
     private long originalTouchTime = 0;
@@ -30,6 +32,41 @@ public class RelativeTouchContext implements TouchContext {
     private final View targetView;
     private final PreferenceConfiguration prefConfig;
     private final Handler handler;
+    private final TrackpadMomentum momentum = new TrackpadMomentum();
+    private long lastMomentumFrame;
+    private double momentumRemainderX, momentumRemainderY;
+    private byte pendingTapButton;
+
+    private final Runnable momentumFrame = new Runnable() {
+        @Override
+        public void run() {
+            if (!momentum.isActive()) {
+                return;
+            }
+            long now = SystemClock.uptimeMillis();
+            TrackpadMomentum.Delta delta = momentum.step(now - lastMomentumFrame);
+            lastMomentumFrame = now;
+            momentumRemainderX += delta.x;
+            momentumRemainderY += delta.y;
+            int x = (int) Math.round(momentumRemainderX);
+            int y = (int) Math.round(momentumRemainderY);
+            momentumRemainderX -= x;
+            momentumRemainderY -= y;
+            if (x != 0 || y != 0) {
+                conn.sendMouseMoveAsMousePosition((short) x, (short) y,
+                        (short) targetView.getWidth(), (short) targetView.getHeight());
+            }
+            if (momentum.isActive()) {
+                handler.postDelayed(this, 16);
+            }
+        }
+    };
+
+    private void cancelMomentum() {
+        handler.removeCallbacks(momentumFrame);
+        momentum.cancel();
+        momentumRemainderX = momentumRemainderY = 0;
+    }
 
     private final Runnable dragTimerRunnable = new Runnable() {
         @Override
@@ -45,6 +82,7 @@ public class RelativeTouchContext implements TouchContext {
             }
 
             // We haven't been cancelled before the timer expired so begin dragging
+            cancelMomentum();
             confirmedDrag = true;
             conn.sendMouseButtonDown(getMouseButtonIndex());
         }
@@ -56,30 +94,35 @@ public class RelativeTouchContext implements TouchContext {
                 @Override
                 public void run() {
                     conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_LEFT);
+                    pendingTapButton = 0;
                 }
             },
             new Runnable() {
                 @Override
                 public void run() {
                     conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_MIDDLE);
+                    pendingTapButton = 0;
                 }
             },
             new Runnable() {
                 @Override
                 public void run() {
                     conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_RIGHT);
+                    pendingTapButton = 0;
                 }
             },
             new Runnable() {
                 @Override
                 public void run() {
                     conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_X1);
+                    pendingTapButton = 0;
                 }
             },
             new Runnable() {
                 @Override
                 public void run() {
                     conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_X2);
+                    pendingTapButton = 0;
                 }
             }
     };
@@ -148,12 +191,17 @@ public class RelativeTouchContext implements TouchContext {
     @Override
     public boolean touchDownEvent(int eventX, int eventY, long eventTime, boolean isNewFinger)
     {
+        cancelMomentum();
         // Get the view dimensions to scale inputs on this touch
-        xFactor = referenceWidth / (double)targetView.getWidth();
-        yFactor = referenceHeight / (double)targetView.getHeight();
+        boolean portraitRelative = !prefConfig.absoluteMouseMode && targetView.getHeight() > targetView.getWidth();
+        xFactor = (portraitRelative ? referenceHeight : referenceWidth) / (double)targetView.getWidth();
+        yFactor = portraitRelative ? xFactor : referenceHeight / (double)targetView.getHeight();
 
         originalTouchX = lastTouchX = eventX;
         originalTouchY = lastTouchY = eventY;
+        lastMotionX = eventX;
+        lastMotionY = eventY;
+        momentum.addSample(eventX, eventY, eventTime);
 
         if (isNewFinger) {
             maxPointerCountInGesture = pointerCount;
@@ -183,19 +231,32 @@ public class RelativeTouchContext implements TouchContext {
         byte buttonIndex = getMouseButtonIndex();
 
         if (confirmedDrag) {
+            cancelMomentum();
             // Raise the button after a drag
             conn.sendMouseButtonUp(buttonIndex);
+            confirmedDrag = false;
         }
         else if (isTap(eventTime))
         {
+            cancelMomentum();
             // Lower the mouse button
             conn.sendMouseButtonDown(buttonIndex);
+            pendingTapButton = buttonIndex;
 
             // Release the mouse button in 100ms to allow for apps that use polling
             // to detect mouse button presses.
             Runnable buttonUpRunnable = buttonUpRunnables[buttonIndex - 1];
             handler.removeCallbacks(buttonUpRunnable);
             handler.postDelayed(buttonUpRunnable, 100);
+        }
+        else if (actionIndex == 0 && prefConfig.absoluteMouseMode && confirmedMove &&
+                maxPointerCountInGesture == 1 && !confirmedScroll && pendingTapButton == 0 &&
+                momentum.start(eventTime)) {
+            lastMomentumFrame = SystemClock.uptimeMillis();
+            handler.postDelayed(momentumFrame, 16);
+        }
+        else {
+            cancelMomentum();
         }
     }
 
@@ -222,7 +283,7 @@ public class RelativeTouchContext implements TouchContext {
         }
 
         // Check if we've exceeded the maximum distance moved
-        distanceMoved += Math.sqrt(Math.pow(eventX - lastTouchX, 2) + Math.pow(eventY - lastTouchY, 2));
+        distanceMoved += Math.hypot(eventX - lastMotionX, eventY - lastMotionY);
         if (distanceMoved >= TAP_DISTANCE_THRESHOLD) {
             confirmedMove = true;
             cancelDragTimer();
@@ -244,10 +305,25 @@ public class RelativeTouchContext implements TouchContext {
             return true;
         }
 
+        if (actionIndex == 0 && pointerCount == 1 && maxPointerCountInGesture == 1 && !confirmedDrag) {
+            momentum.addSample(eventX, eventY, eventTime);
+        }
+
+        if (eventX != lastMotionX || eventY != lastMotionY) {
+            checkForConfirmedMove(eventX, eventY);
+            lastMotionX = eventX;
+            lastMotionY = eventY;
+            checkForConfirmedScroll();
+        }
+
         if (eventX != lastTouchX || eventY != lastTouchY)
         {
-            checkForConfirmedMove(eventX, eventY);
-            checkForConfirmedScroll();
+
+            // Hold desktop tap jitter until a move is confirmed, so a tap cannot move the cursor.
+            if (prefConfig.absoluteMouseMode && actionIndex == 0 && pointerCount == 1 &&
+                    !confirmedMove && !confirmedDrag) {
+                return true;
+            }
 
             // We only send moves and drags for the primary touch point
             if (actionIndex == 0) {
@@ -309,6 +385,7 @@ public class RelativeTouchContext implements TouchContext {
     @Override
     public void cancelTouch() {
         cancelled = true;
+        cancelMomentum();
 
         // Cancel the drag timer
         cancelDragTimer();
@@ -316,6 +393,16 @@ public class RelativeTouchContext implements TouchContext {
         // If it was a confirmed drag, we'll need to raise the button now
         if (confirmedDrag) {
             conn.sendMouseButtonUp(getMouseButtonIndex());
+            confirmedDrag = false;
+        }
+        releasePendingTap();
+    }
+
+    private void releasePendingTap() {
+        if (pendingTapButton != 0) {
+            handler.removeCallbacks(buttonUpRunnables[pendingTapButton - 1]);
+            conn.sendMouseButtonUp(pendingTapButton);
+            pendingTapButton = 0;
         }
     }
 
@@ -326,7 +413,16 @@ public class RelativeTouchContext implements TouchContext {
 
     @Override
     public void setPointerCount(int pointerCount) {
+        // Game broadcasts new-finger counts to every context before accepting the touch.
+        // End a polling click from any prior gesture before that finger can move the cursor.
+        if (pointerCount > this.pointerCount) {
+            releasePendingTap();
+        }
         this.pointerCount = pointerCount;
+        // Called for every context on any new finger, including the secondary one.
+        if (pointerCount > 0) {
+            cancelMomentum();
+        }
 
         if (pointerCount > maxPointerCountInGesture) {
             maxPointerCountInGesture = pointerCount;

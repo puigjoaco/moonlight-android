@@ -41,6 +41,7 @@ public class ComputerDatabaseManager {
     private static final String MAC_ADDRESS_COLUMN_NAME = "MacAddress";
     private static final String SERVER_CERT_COLUMN_NAME = "ServerCert";
 
+    static final String LAST_USED_COLUMN_NAME = "LastUsed";
     private SQLiteDatabase computerDb;
 
     public ComputerDatabaseManager(Context c) {
@@ -66,6 +67,8 @@ public class ComputerDatabaseManager {
                 COMPUTER_TABLE_NAME, COMPUTER_UUID_COLUMN_NAME, COMPUTER_NAME_COLUMN_NAME,
                 ADDRESSES_COLUMN_NAME, MAC_ADDRESS_COLUMN_NAME, SERVER_CERT_COLUMN_NAME));
 
+        migrateLastUsed(computerDb);
+
         // Move all computers from the old DB (if any) to the new one
         List<ComputerDetails> oldComputers = LegacyDatabaseReader.migrateAllComputers(c);
         for (ComputerDetails computer : oldComputers) {
@@ -79,6 +82,30 @@ public class ComputerDatabaseManager {
         for (ComputerDetails computer : oldComputers) {
             updateComputer(computer);
         }
+    }
+
+    /** Additive and idempotent: never rebuilds or discards the existing hosts/certificates. */
+    static void migrateLastUsed(SQLiteDatabase db) {
+        db.beginTransaction();
+        try {
+            boolean found = false;
+            try (Cursor cursor = db.rawQuery("PRAGMA table_info(Computers)", null)) {
+                while (cursor.moveToNext()) {
+                    if (LAST_USED_COLUMN_NAME.equals(cursor.getString(cursor.getColumnIndexOrThrow("name")))) {
+                        found = true;
+                    }
+                }
+            }
+            if (!found) db.execSQL("ALTER TABLE Computers ADD COLUMN LastUsed INTEGER NOT NULL DEFAULT 0");
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public void markUsed(String uuid, long timestamp) {
+        computerDb.execSQL("UPDATE Computers SET LastUsed = MAX(LastUsed, ?) WHERE UUID = ?",
+                new Object[]{Math.max(0, timestamp), uuid});
     }
 
     public void deleteComputer(ComputerDetails details) {
@@ -107,40 +134,50 @@ public class ComputerDatabaseManager {
                 address.getString(AddressFields.ADDRESS), address.getInt(AddressFields.PORT));
     }
 
-    public boolean updateComputer(ComputerDetails details) {
-        ContentValues values = new ContentValues();
-        values.put(COMPUTER_UUID_COLUMN_NAME, details.uuid);
-        values.put(COMPUTER_NAME_COLUMN_NAME, details.name);
-
+    public synchronized boolean updateComputer(ComputerDetails details) {
+        computerDb.beginTransaction();
         try {
-            JSONObject addresses = new JSONObject();
-            addresses.put(AddressFields.LOCAL, tupleToJson(details.localAddress));
-            addresses.put(AddressFields.REMOTE, tupleToJson(details.remoteAddress));
-            addresses.put(AddressFields.MANUAL, tupleToJson(details.manualAddress));
-            addresses.put(AddressFields.IPv6, tupleToJson(details.ipv6Address));
-            values.put(ADDRESSES_COLUMN_NAME, addresses.toString());
-        } catch (JSONException e) {
-            throw new RuntimeException(e);
-        }
+            ContentValues values = new ContentValues();
+            ComputerDetails saved = getComputerByUUID(details.uuid);
+            values.put(LAST_USED_COLUMN_NAME, Math.max(details.lastUsed, saved == null ? 0 : saved.lastUsed));
+            values.put(COMPUTER_UUID_COLUMN_NAME, details.uuid);
+            values.put(COMPUTER_NAME_COLUMN_NAME, details.name);
 
-        values.put(MAC_ADDRESS_COLUMN_NAME, details.macAddress);
-        try {
-            if (details.serverCert != null) {
-                values.put(SERVER_CERT_COLUMN_NAME, details.serverCert.getEncoded());
+            try {
+                JSONObject addresses = new JSONObject();
+                addresses.put(AddressFields.LOCAL, tupleToJson(details.localAddress));
+                addresses.put(AddressFields.REMOTE, tupleToJson(details.remoteAddress));
+                addresses.put(AddressFields.MANUAL, tupleToJson(details.manualAddress));
+                addresses.put(AddressFields.IPv6, tupleToJson(details.ipv6Address));
+                values.put(ADDRESSES_COLUMN_NAME, addresses.toString());
+            } catch (JSONException e) {
+                throw new RuntimeException(e);
             }
-            else {
+
+            values.put(MAC_ADDRESS_COLUMN_NAME, details.macAddress);
+            try {
+                if (details.serverCert != null) {
+                    values.put(SERVER_CERT_COLUMN_NAME, details.serverCert.getEncoded());
+                }
+                else {
+                    values.put(SERVER_CERT_COLUMN_NAME, (byte[])null);
+                }
+            } catch (CertificateEncodingException e) {
                 values.put(SERVER_CERT_COLUMN_NAME, (byte[])null);
+                e.printStackTrace();
             }
-        } catch (CertificateEncodingException e) {
-            values.put(SERVER_CERT_COLUMN_NAME, (byte[])null);
-            e.printStackTrace();
+            boolean updated = -1 != computerDb.insertWithOnConflict(COMPUTER_TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE);
+            computerDb.setTransactionSuccessful();
+            return updated;
+        } finally {
+            computerDb.endTransaction();
         }
-        return -1 != computerDb.insertWithOnConflict(COMPUTER_TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
     private ComputerDetails getComputerFromCursor(Cursor c) {
         ComputerDetails details = new ComputerDetails();
 
+        details.lastUsed = c.getLong(c.getColumnIndexOrThrow(LAST_USED_COLUMN_NAME));
         details.uuid = c.getString(0);
         details.name = c.getString(1);
         try {

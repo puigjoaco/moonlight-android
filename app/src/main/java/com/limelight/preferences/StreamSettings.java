@@ -39,6 +39,7 @@ import java.util.Arrays;
 
 public class StreamSettings extends Activity {
     private PreferenceConfiguration previousPrefs;
+    private int portaNightMode;
     private int previousDisplayPixelCount;
 
     // HACK for Android 9
@@ -58,6 +59,7 @@ public class StreamSettings extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        portaNightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         previousPrefs = PreferenceConfiguration.readPreferences(this);
 
         UiHelper.setLocale(this);
@@ -65,6 +67,11 @@ public class StreamSettings extends Activity {
         setContentView(R.layout.activity_stream_settings);
 
         UiHelper.notifyNewRootView(this);
+        // UiHelper's legacy layout flags replace the theme's light-system-bar flags.
+        androidx.core.view.WindowInsetsControllerCompat bars =
+                new androidx.core.view.WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        bars.setAppearanceLightStatusBars(getResources().getBoolean(R.bool.porta_is_light));
+        bars.setAppearanceLightNavigationBars(getResources().getBoolean(R.bool.porta_is_light));
     }
 
     @Override
@@ -88,6 +95,10 @@ public class StreamSettings extends Activity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        if ((newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK) != portaNightMode) {
+            recreate();
+            return;
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode mode = getWindowManager().getDefaultDisplay().getMode();
@@ -259,7 +270,8 @@ public class StreamSettings extends Activity {
 
             prefs.edit()
                     .putInt(PreferenceConfiguration.BITRATE_PREF_STRING,
-                            PreferenceConfiguration.getDefaultBitrate(res, fps))
+                            PreferenceConfiguration.getDefaultBitrate(
+                                    PreferenceConfiguration.resolveResolution(getActivity(), res), fps))
                     .apply();
         }
 
@@ -353,6 +365,14 @@ public class StreamSettings extends Activity {
 
             Display display = getActivity().getWindowManager().getDefaultDisplay();
             float maxSupportedFps = display.getRefreshRate();
+
+            // Keep a distinct value even when the panel matches a fixed resolution: this
+            // choice follows device orientation, including on 1080p/4K displays.
+            ListPreference resolution = (ListPreference) findPreference(PreferenceConfiguration.RESOLUTION_PREF_STRING);
+            nativeResolutionStartIndex = resolution.getEntryValues().length;
+            appendPreferenceEntry(resolution,
+                    getString(R.string.resolution_prefix_native_fullscreen),
+                    PreferenceConfiguration.DEFAULT_RESOLUTION);
 
             // Hide non-supported resolution/FPS combinations
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

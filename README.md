@@ -36,6 +36,9 @@ started as a project at [MHacks](http://mhacks.org).
 
 ## Native desktop fork
 
+Porta supports one pairing only: this Android app as the client and a Linux (KDE Plasma)
+Sunshine fork as the host. Other platforms may come later.
+
 The `nonRootDebug` build installs beside upstream as `app.porta`, labeled
 **Porta**. Select a **Native fullscreen** resolution to follow device
 orientation at native panel pixels. Fixed resolutions retain upstream behavior;

@@ -1,0 +1,37 @@
+<resources>
+    <color name="porta_surface">@color/porta_background</color>
+    <color name="porta_background">#121019</color>
+    <color name="porta_surface_dim">#0E0C14</color>
+    <color name="porta_surface_bright">#2F2A37</color>
+    <color name="porta_surface_container_lowest">#0C0A11</color>
+    <color name="porta_surface_container_low">#18151F</color>
+    <color name="porta_surface_container">#1C1924</color>
+    <color name="porta_surface_container_high">#26222E</color>
+    <color name="porta_surface_container_highest">#312C39</color>
+    <color name="porta_on_surface">#ECE7EF</color>
+    <color name="porta_on_surface_variant">#A59DAE</color>
+    <color name="porta_outline">#6E6779</color>
+    <color name="porta_outline_variant">#3A3444</color>
+    <color name="porta_primary">#FFB27A</color>
+    <color name="porta_on_primary">#3A1606</color>
+    <color name="porta_primary_container">#5A2410</color>
+    <color name="porta_on_primary_container">#FFDCC8</color>
+    <color name="porta_secondary">#F28AA0</color>
+    <color name="porta_on_secondary">#4A0F23</color>
+    <color name="porta_secondary_container">#6A2338</color>
+    <color name="porta_on_secondary_container">#FFD9E0</color>
+    <color name="porta_tertiary">#C6B5FF</color>
+    <color name="porta_on_tertiary">#2D1A66</color>
+    <color name="porta_tertiary_container">#44328A</color>
+    <color name="porta_on_tertiary_container">#E6DEFF</color>
+    <color name="porta_error">#FFB4AB</color>
+    <color name="porta_on_error">#690005</color>
+    <color name="porta_error_container">#93000A</color>
+    <color name="porta_on_error_container">#FFDAD6</color>
+    <color name="porta_inverse_surface">#ECE7EF</color>
+    <color name="porta_inverse_on_surface">#2A2631</color>
+    <color name="porta_inverse_primary">#A8401B</color>
+    <color name="porta_scrim">#000000</color>
+    <color name="porta_online">#5FD39A</color>
+    <color name="porta_warning">#F2B33D</color>
+</resources>

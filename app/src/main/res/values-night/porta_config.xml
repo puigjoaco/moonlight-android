@@ -1,0 +1,4 @@
+<resources>
+    <bool name="porta_is_light">false</bool>
+    <item name="porta_scrim_amount" type="dimen" format="float">0.42</item>
+</resources>

@@ -1,0 +1,6 @@
+Inter Variable: https://github.com/google/fonts/tree/main/ofl/inter
+Inter font copyright and SIL Open Font License 1.1: Inter-OFL.txt.
+Material Symbols Rounded (weight 400, grade 0, optical size 24):
+https://github.com/google/material-design-icons/tree/master/symbols/web
+Copyright Google LLC. Apache License 2.0: Material-Symbols-LICENSE.txt.
+Porta brand vectors are derived from the approved Porta SVG artwork.

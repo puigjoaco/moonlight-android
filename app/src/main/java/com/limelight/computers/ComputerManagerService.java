@@ -132,6 +132,7 @@ public class ComputerManagerService extends Service {
             // due to detecting the PC via mDNS) without the saved external address. If we
             // write to the DB without doing this first, we can overwrite our existing data.
             if (existingComputer != null) {
+                details.lastUsed = Math.max(details.lastUsed, existingComputer.lastUsed);
                 existingComputer.update(details);
                 dbManager.updateComputer(existingComputer);
             }
