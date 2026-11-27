@@ -195,7 +195,7 @@ public final class PortaViews {
             case TAILSCALE:
                 return R.string.porta_tailscale;
             default:
-                return R.string.porta_remote;
+                return R.string.porta_internet;
         }
     }
 

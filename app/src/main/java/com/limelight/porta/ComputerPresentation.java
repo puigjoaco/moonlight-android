@@ -32,18 +32,8 @@ public final class ComputerPresentation {
         ComputerDetails.AddressTuple a = c.activeAddress;
         if (a == null) a = c.manualAddress != null ? c.manualAddress : c.localAddress;
         if (a == null) return Route.REMOTE;
-        String host = a.address.toLowerCase(java.util.Locale.ROOT);
-        if (host.endsWith(".ts.net") || host.startsWith("fd7a:115c:a1e0:")) return Route.TAILSCALE;
-        String[] octets = host.split("\\.");
-        if (octets.length == 4) {
-            try {
-                if (Integer.parseInt(octets[0]) == 100) {
-                    int second = Integer.parseInt(octets[1]);
-                    if (second >= 64 && second <= 127) return Route.TAILSCALE;
-                }
-            } catch (NumberFormatException ignored) {
-            }
-        }
+        if (ComputerDetails.isTailscaleAddress(a.address)
+                || (c.activeAddress != null && c.activeAddressIsTailscale)) return Route.TAILSCALE;
         return a.equals(c.localAddress) ? Route.LOCAL : Route.REMOTE;
     }
 

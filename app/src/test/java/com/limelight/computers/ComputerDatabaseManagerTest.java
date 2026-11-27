@@ -93,4 +93,26 @@ public class ComputerDatabaseManagerTest {
         assertEquals(0, db.getComputerByUUID(c.uuid).lastUsed);
         db.close();
     }
+    @Test
+    public void partialUpdatesPreserveIndependentRoutesAcrossReopen() {
+        ComputerDatabaseManager db = new ComputerDatabaseManager(context);
+        ComputerDetails c = host();
+        c.localAddress = new ComputerDetails.AddressTuple("192.168.4.27", 47989);
+        c.remoteAddress = new ComputerDetails.AddressTuple("203.0.113.10", 47989);
+        db.updateComputer(c);
+        ComputerDetails manual = host();
+        manual.manualAddress = new ComputerDetails.AddressTuple("torre", 47989);
+        manual.localAddress = new ComputerDetails.AddressTuple("100.97.8.59", 47989);
+        db.updateComputer(manual);
+        db.updateComputer(host());
+        db.close();
+        db = new ComputerDatabaseManager(context);
+        ComputerDetails saved = db.getComputerByUUID(c.uuid);
+        assertEquals(c.localAddress, saved.localAddress);
+        assertEquals(c.remoteAddress, saved.remoteAddress);
+        assertEquals(manual.manualAddress, saved.manualAddress);
+        assertEquals(1, db.getAllComputers().size());
+        db.close();
+    }
+
 }

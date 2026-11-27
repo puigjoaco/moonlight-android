@@ -52,6 +52,7 @@ import java.util.function.BooleanSupplier;
 
 /** Porta home. Discovery, pairing and launch continue through Moonlight's existing services. */
 public class PcView extends AppCompatActivity {
+    public static final String EXTRA_PAIR_UUID = "PortaPairUuid";
     private final List<ComputerDetails> computers = new ArrayList<>();
     private final HostsAdapter adapter = new HostsAdapter();
     private ComputerManagerService.ComputerManagerBinder managerBinder;
@@ -111,6 +112,26 @@ public class PcView extends AppCompatActivity {
                         new Intent(this, ComputerManagerService.class),
                         serviceConnection,
                         Service.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String uuid = intent.getStringExtra(EXTRA_PAIR_UUID);
+        if (uuid != null && managerBinder != null) {
+            ComputerDetails host = managerBinder.getComputer(uuid);
+            if (host != null) consumePairRequest(host);
+        }
+    }
+
+    private void consumePairRequest(ComputerDetails host) {
+        String uuid = getIntent().getStringExtra(EXTRA_PAIR_UUID);
+        if (inForeground && !pairing && managerBinder != null && uuid != null
+                && uuid.equals(host.uuid) && host.state == ComputerDetails.State.ONLINE) {
+            getIntent().removeExtra(EXTRA_PAIR_UUID);
+            doPair(host, true);
+        }
     }
 
     private void initializeWithRenderer() {
@@ -378,6 +399,7 @@ public class PcView extends AppCompatActivity {
     }
 
     private void updateComputer(ComputerDetails details) {
+        consumePairRequest(details);
         for (int i = 0; i < computers.size(); i++)
             if (Objects.equals(computers.get(i).uuid, details.uuid)) {
                 details.lastUsed = Math.max(details.lastUsed, computers.get(i).lastUsed);

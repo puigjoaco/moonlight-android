@@ -50,4 +50,11 @@
         android:preferKeepClear="true"
         android:visibility="gone" />
 
+    <!-- Session state UI stays above the video surface without changing its lifecycle. -->
+    <FrameLayout
+        android:id="@+id/portaSessionState"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
 </merge>

@@ -141,4 +141,25 @@ public class ConnectSheetTest {
         assertTrue(bounds.bottom - scroll.getScrollY() <= height);
         assertTrue(bounds.top - scroll.getScrollY() >= 0);
     }
+    @Test public void statusTracksTheSelectedLocalTailscaleAndInternetRoute() {
+        PcView home = spy(Robolectric.buildActivity(PcView.class).get());
+        ComputerDetails host = new ComputerDetails();
+        host.state = ComputerDetails.State.ONLINE;
+        host.pairState = PairState.PAIRED;
+        host.localAddress = new ComputerDetails.AddressTuple("192.168.4.27", 47989);
+        host.activeAddress = host.localAddress;
+        ConnectSheet sheet = createSheet(home, host);
+        sheet.onCreateView(LayoutInflater.from(home), null, null);
+        android.widget.TextView status = ReflectionHelpers.getField(sheet, "routeView");
+        assertTrue(status.getText().toString().startsWith(home.getString(R.string.porta_local)));
+        host.activeAddress = new ComputerDetails.AddressTuple("torre", 47989);
+        host.activeAddressIsTailscale = true;
+        sheet.refreshConnectionState();
+        assertTrue(status.getText().toString().startsWith(home.getString(R.string.porta_tailscale)));
+        host.activeAddress = new ComputerDetails.AddressTuple("203.0.113.10", 47989);
+        host.activeAddressIsTailscale = false;
+        sheet.refreshConnectionState();
+        assertTrue(status.getText().toString().startsWith(home.getString(R.string.porta_internet)));
+    }
+
 }

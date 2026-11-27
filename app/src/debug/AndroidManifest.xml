@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug APK only: deterministic Game session states without a server or real input. -->
+        <activity android:name="com.limelight.porta.SessionPreviewActivity"
+            android:exported="true" android:theme="@style/Theme.Porta.Stream"
+            android:windowSoftInputMode="adjustNothing|stateAlwaysHidden"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection" />
+    </application>
+</manifest>

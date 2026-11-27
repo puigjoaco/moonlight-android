@@ -275,8 +275,8 @@ public class NvConnection {
         context.serverGfeVersion = h.getGfeVersion(serverInfo);
                 
         if (h.getPairState(serverInfo) != PairingManager.PairState.PAIRED) {
-            context.connListener.displayMessage("Device not paired with computer");
-            return false;
+            // Preserve the authentication cause for the session UI instead of a generic failure.
+            throw new HostHttpResponseException(401, "Device not paired with computer");
         }
 
         context.serverCodecModeSupport = (int)h.getServerCodecModeSupport(serverInfo);

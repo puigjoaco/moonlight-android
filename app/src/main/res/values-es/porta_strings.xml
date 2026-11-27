@@ -56,4 +56,15 @@
         <item quantity="many">usado hace %1$d horas</item>
         <item quantity="other">usado hace %1$d horas</item>
     </plurals>
+    <string name="porta_connecting">Conectando</string>
+    <string name="porta_reconnecting">Reconectando</string>
+    <string name="porta_back">Volver</string>
+    <string name="porta_exit">Salir</string>
+    <string name="porta_computer">Equipo</string>
+    <string name="porta_no_response">%1$s no responde</string>
+    <string name="porta_service_unavailable">Porta no está activo en %1$s</string>
+    <string name="porta_pair_revoked">%1$s ya no reconoce este teléfono</string>
+    <string name="porta_ports_blocked">No se pudo abrir la conexión</string>
+    <string name="porta_connection_lost">Se perdió la conexión con %1$s</string>
+    <string name="porta_decoder_unsupported">Este dispositivo no admite reproducción H.264 acelerada por hardware.</string>
 </resources>

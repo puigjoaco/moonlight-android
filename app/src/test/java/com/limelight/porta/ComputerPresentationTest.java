@@ -70,7 +70,7 @@ public class ComputerPresentationTest {
         }
         for (String address :
                 new String[] {
-                    "100.63.255.254", "100.128.0.1", "100.invalid.test", "example.test"
+                    "100.63.255.254", "100.128.0.1", "100.invalid.test", "100.64.999.1", "100.64.1.-1", "example.test"
                 }) {
             ComputerDetails c = new ComputerDetails();
             c.activeAddress = new ComputerDetails.AddressTuple(address, 1);
@@ -104,4 +104,28 @@ public class ComputerPresentationTest {
         ComputerDetails copy = new ComputerDetails(saved);
         assertEquals(500, copy.lastUsed);
     }
+    @Test
+    public void magicDnsUsesTheRespondingHostsTailscaleInterface() {
+        ComputerDetails c = new ComputerDetails();
+        c.activeAddress = new ComputerDetails.AddressTuple("torre", 47989);
+        c.activeAddressIsTailscale = true;
+        assertEquals(ComputerPresentation.Route.TAILSCALE, ComputerPresentation.route(c));
+        ComputerDetails response = new ComputerDetails();
+        response.activeAddress = new ComputerDetails.AddressTuple("203.0.113.10", 47989);
+        c.update(response);
+        assertEquals(ComputerPresentation.Route.REMOTE, ComputerPresentation.route(c));
+    }
+
+    @Test
+    public void externalPortUpdateDoesNotMutateAnAddressInAnEarlierSnapshot() {
+        ComputerDetails c = new ComputerDetails();
+        c.remoteAddress = new ComputerDetails.AddressTuple("203.0.113.10", 47989);
+        ComputerDetails snapshot = new ComputerDetails(c);
+        ComputerDetails response = new ComputerDetails();
+        response.externalPort = 48089;
+        c.update(response);
+        assertEquals(48089, c.remoteAddress.port);
+        assertEquals(47989, snapshot.remoteAddress.port);
+    }
+
 }

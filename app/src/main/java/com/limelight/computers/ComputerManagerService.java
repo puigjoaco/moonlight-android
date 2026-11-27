@@ -7,6 +7,8 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,7 +26,6 @@ import com.limelight.nvstream.http.PairingManager;
 import com.limelight.nvstream.mdns.MdnsComputer;
 import com.limelight.nvstream.mdns.MdnsDiscoveryListener;
 import com.limelight.utils.CacheHelper;
-import com.limelight.utils.NetHelper;
 import com.limelight.utils.ServerHelper;
 
 import android.app.Service;
@@ -35,6 +36,8 @@ import android.content.ServiceConnection;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.LinkProperties;
+import android.net.RouteInfo;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
@@ -63,6 +66,9 @@ public class ComputerManagerService extends Service {
     private final AtomicInteger activePolls = new AtomicInteger(0);
     private boolean pollingActive = false;
     private final Lock defaultNetworkLock = new ReentrantLock();
+    private final Map<String, Long> nextExternalAddressRefresh = new HashMap<>();
+    private static final long EXTERNAL_ADDRESS_REFRESH_MS = 5 * 60 * 1000;
+    private static final long EXTERNAL_ADDRESS_RETRY_MS = 30 * 1000;
 
     private ConnectivityManager.NetworkCallback networkCallback;
 
@@ -127,6 +133,10 @@ public class ComputerManagerService extends Service {
                 return false;
             }
 
+            // Refresh even for saved hosts: residential public addresses can change, and
+            // a previous STUN failure must not leave a LAN-only entry forever.
+            refreshExternalAddress(details);
+
             // If we already have an entry for this computer in the DB, we must
             // combine the existing data with this new data (which may be partially available
             // due to detecting the PC via mDNS) without the saved external address. If we
@@ -134,21 +144,10 @@ public class ComputerManagerService extends Service {
             if (existingComputer != null) {
                 details.lastUsed = Math.max(details.lastUsed, existingComputer.lastUsed);
                 existingComputer.update(details);
-                dbManager.updateComputer(existingComputer);
+                details.update(existingComputer);
+                dbManager.updateComputer(details);
             }
             else {
-                try {
-                    // If the active address is a site-local address (RFC 1918),
-                    // then use STUN to populate the external address field if
-                    // it's not set already.
-                    if (details.remoteAddress == null) {
-                        InetAddress addr = InetAddress.getByName(details.activeAddress.address);
-                        if (addr.isSiteLocalAddress()) {
-                            populateExternalAddress(details);
-                        }
-                    }
-                } catch (UnknownHostException ignored) {}
-
                 dbManager.updateComputer(details);
             }
         }
@@ -331,65 +330,72 @@ public class ComputerManagerService extends Service {
         return false;
     }
 
-    private void populateExternalAddress(ComputerDetails details) {
-        boolean boundToNetwork = false;
-        boolean activeNetworkIsVpn = NetHelper.isActiveNetworkVpn(this);
+    /** Only STUN through the actual on-link LAN, never through cellular or a VPN exit. */
+    void refreshExternalAddress(ComputerDetails details) {
+        if (details.activeAddress == null) return;
+        final InetAddress host;
+        try {
+            host = InetAddress.getByName(details.activeAddress.address);
+        } catch (UnknownHostException e) {
+            return;
+        }
+        if (!(host instanceof Inet4Address) || !host.isSiteLocalAddress()) return;
+
         ConnectivityManager connMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-
-        // Check if we're currently connected to a VPN which may send our
-        // STUN request from an unexpected interface
-        if (activeNetworkIsVpn) {
-            // Acquire the default network lock since we could be changing global process state
-            defaultNetworkLock.lock();
-
-            // On Lollipop or later, we can bind our process to the underlying interface
-            // to ensure our STUN request goes out on that interface or not at all (which is
-            // preferable to getting a VPN endpoint address back).
-            Network[] networks = connMgr.getAllNetworks();
-            for (Network net : networks) {
-                NetworkCapabilities netCaps = connMgr.getNetworkCapabilities(net);
-                if (netCaps != null) {
-                    if (!netCaps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
-                            !netCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                        // This network looks like an underlying multicast-capable transport,
-                        // so let's guess that it's probably where our mDNS response came from.
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            if (connMgr.bindProcessToNetwork(net)) {
-                                boundToNetwork = true;
-                                break;
-                            }
-                        } else if (ConnectivityManager.setProcessDefaultNetwork(net)) {
-                            boundToNetwork = true;
-                            break;
-                        }
-                    }
+        Network lan = null;
+        for (Network network : connMgr.getAllNetworks()) {
+            NetworkCapabilities caps = connMgr.getNetworkCapabilities(network);
+            LinkProperties links = connMgr.getLinkProperties(network);
+            if (caps == null || links == null
+                    || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                    || caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) continue;
+            for (RouteInfo route : links.getRoutes()) {
+                if (route.getGateway().isAnyLocalAddress() && route.matches(host)) {
+                    lan = network;
+                    break;
                 }
             }
+            if (lan != null) break;
+        }
+        if (lan == null) return;
 
-            // Perform the STUN request if we're not on a VPN or if we bound to a network
-            if (!activeNetworkIsVpn || boundToNetwork) {
-                String stunResolvedAddress = NvConnection.findExternalAddressForMdns("stun.moonlight-stream.org", 3478);
-                if (stunResolvedAddress != null) {
-                    // We don't know for sure what the external port is, so we will have to guess.
-                    // When we contact the PC (if we haven't already), it will update the port.
-                    details.remoteAddress = new ComputerDetails.AddressTuple(stunResolvedAddress, details.guessExternalPort());
-                }
+        // Binding affects the process, so serialize every STUN attempt (with or without VPN).
+        defaultNetworkLock.lock();
+        boolean bound = false;
+        try {
+            String key = details.uuid + "@" + details.activeAddress + "@" + lan;
+            long now = SystemClock.elapsedRealtime();
+            Long next = nextExternalAddressRefresh.get(key);
+            if (next != null && now < next) return;
+            nextExternalAddressRefresh.put(key, now + EXTERNAL_ADDRESS_RETRY_MS);
+            bound = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    ? connMgr.bindProcessToNetwork(lan)
+                    : ConnectivityManager.setProcessDefaultNetwork(lan);
+            if (!bound) {
+                LimeLog.warning("Public address discovery skipped: cannot bind to the host LAN");
+                return;
             }
-
-            // Unbind from the network
-            if (boundToNetwork) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    connMgr.bindProcessToNetwork(null);
-                } else {
-                    ConnectivityManager.setProcessDefaultNetwork(null);
-                }
+            String address = findExternalAddress();
+            if (address != null) {
+                details.remoteAddress = new ComputerDetails.AddressTuple(address, details.guessExternalPort());
+                nextExternalAddressRefresh.put(key, now + EXTERNAL_ADDRESS_REFRESH_MS);
+            } else {
+                LimeLog.warning("Public address discovery failed; will retry while host is on LAN");
             }
-
-            // Unlock the network state
-            if (activeNetworkIsVpn) {
+        } finally {
+            try {
+                if (bound) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) connMgr.bindProcessToNetwork(null);
+                    else ConnectivityManager.setProcessDefaultNetwork(null);
+                }
+            } finally {
                 defaultNetworkLock.unlock();
             }
         }
+    }
+
+    String findExternalAddress() {
+        return NvConnection.findExternalAddressForMdns("stun.moonlight-stream.org", 3478);
     }
 
     private MdnsDiscoveryListener createDiscoveryListener() {
@@ -401,13 +407,6 @@ public class ComputerManagerService extends Service {
                 // Populate the computer template with mDNS info
                 if (computer.getLocalAddress() != null) {
                     details.localAddress = new ComputerDetails.AddressTuple(computer.getLocalAddress().getHostAddress(), computer.getPort());
-
-                    // Since we're on the same network, we can use STUN to find
-                    // our WAN address, which is also very likely the WAN address
-                    // of the PC. We can use this later to connect remotely.
-                    if (computer.getLocalAddress() instanceof Inet4Address) {
-                        populateExternalAddress(details);
-                    }
                 }
                 if (computer.getIpv6Address() != null) {
                     details.ipv6Address = new ComputerDetails.AddressTuple(computer.getIpv6Address().getHostAddress(), computer.getPort());
@@ -542,7 +541,7 @@ public class ComputerManagerService extends Service {
         }
     }
 
-    private ComputerDetails tryPollIp(ComputerDetails details, ComputerDetails.AddressTuple address) {
+    ComputerDetails tryPollIp(ComputerDetails details, ComputerDetails.AddressTuple address) {
         try {
             // If the current address's port number matches the active address's port number, we can also assume
             // the HTTPS port will also match. This assumption is currently safe because Sunshine sets all ports
@@ -570,6 +569,11 @@ public class ComputerManagerService extends Service {
                 return null;
             }
 
+            // Sunshine reports the interface used by this request as LocalIP. On a
+            // Tailscale request that is the host's 100.x address, not its LAN address.
+            newDetails.activeAddressIsTailscale = ComputerDetails.isTailscaleAddress(address.address)
+                    || (newDetails.localAddress != null
+                            && ComputerDetails.isTailscaleAddress(newDetails.localAddress.address));
             return newDetails;
         } catch (XmlPullParserException e) {
             e.printStackTrace();
@@ -625,7 +629,7 @@ public class ComputerManagerService extends Service {
         tuple.pollingThread.start();
     }
 
-    private ComputerDetails parallelPollPc(ComputerDetails details) throws InterruptedException {
+    ComputerDetails parallelPollPc(ComputerDetails details) throws InterruptedException {
         ParallelPollTuple localInfo = new ParallelPollTuple(details.localAddress, details);
         ParallelPollTuple manualInfo = new ParallelPollTuple(details.manualAddress, details);
         ParallelPollTuple remoteInfo = new ParallelPollTuple(details.remoteAddress, details);

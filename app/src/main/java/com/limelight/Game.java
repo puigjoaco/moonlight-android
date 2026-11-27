@@ -34,10 +34,10 @@ import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
 import com.limelight.ui.KeyboardOverlay;
 import com.limelight.binding.input.keyboard.VirtualKey;
-import com.limelight.utils.Dialog;
+import com.limelight.porta.SessionUi;
+import com.limelight.porta.SessionFailure;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
-import com.limelight.utils.SpinnerDialog;
 import com.limelight.utils.UiHelper;
 
 import android.annotation.SuppressLint;
@@ -126,7 +126,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean stopped;
     private final Handler rotationHandler = new Handler();
     private final Runnable rotationReconnect = this::reconnectForRotation;
-    private SpinnerDialog spinner;
+    private Thread stoppingConnection;
+    private SessionUi sessionUi;
+    private SessionUi.ReconnectPresentation reconnectPresentation;
     private boolean displayedFailureDialog = false;
     private boolean connecting = false;
     private boolean connected = false;
@@ -308,10 +310,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // Inflate the content
         setContentView(R.layout.activity_game);
 
-        // Start the spinner
-        if (!getIntent().getBooleanExtra(EXTRA_ROTATION_RECONNECT, false)) {
-            spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
-                    getResources().getString(R.string.conn_establishing_msg), true);
+        sessionUi = new SessionUi(this, findViewById(R.id.portaSessionState),
+                findViewById(R.id.surfaceView), getIntent().getStringExtra(EXTRA_PC_NAME),
+                this::finish, this::retrySession, this::pairSessionAgain);
+        if (getIntent().getBooleanExtra(EXTRA_ROTATION_RECONNECT, false)) {
+            Object retained = getLastNonConfigurationInstance();
+            reconnectPresentation = sessionUi.reconnecting(retained instanceof SessionUi.ReconnectPresentation
+                    ? (SessionUi.ReconnectPresentation) retained : null);
+        } else {
+            sessionUi.connecting();
         }
 
         // Read the stream preferences
@@ -662,15 +669,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     usbDriverServiceConnection, Service.BIND_AUTO_CREATE);
         }
 
-        if (!decoderRenderer.isAvcSupported()) {
-            if (spinner != null) {
-                spinner.dismiss();
-                spinner = null;
-            }
+        if (BuildConfig.DEBUG && showSessionPreview(sessionUi)) return;
 
-            // If we can't find an AVC decoder, we can't proceed
-            Dialog.displayDialog(this, getResources().getString(R.string.conn_error_title),
-                    "This device or ROM doesn't support hardware accelerated H.264 playback.", true);
+        if (!decoderRenderer.isAvcSupported()) {
+            // If we can't find an AVC decoder, we can't proceed.
+            sessionUi.unsupportedDecoder();
             return;
         }
 
@@ -678,7 +681,61 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         streamView.getHolder().addCallback(this);
     }
 
-    private void setPreferredOrientationForCurrentDisplay() {
+    /** Debug source-set subclasses can preview presentation without a live host. */
+    protected boolean showSessionPreview(SessionUi ui) { return false; }
+
+    @Override
+    public Object onRetainNonConfigurationInstance() {
+        return reconnectPresentation;
+    }
+
+    private void pairSessionAgain() {
+        startActivity(new Intent(this, PcView.class)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(PcView.EXTRA_PAIR_UUID, getIntent().getStringExtra(EXTRA_PC_UUID)));
+        finish();
+    }
+
+    private void retrySession() {
+        if (stopped || rotationRestart || isFinishing()) return;
+        // As for rotation, wait for native teardown before creating the replacement session.
+        rotationRestart = true;
+        displayedFailureDialog = true;
+        connected = connecting = false;
+        updatePipAutoEnter();
+        setInputGrabState(false);
+        cancelTouchContexts();
+        if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
+        stopMicrophone();
+        stopCamera();
+        controllerHandler.stop();
+        decoderRenderer.prepareForStop();
+        sessionUi.connecting();
+        final Thread teardown = stoppingConnection;
+        new Thread(() -> {
+            try {
+                if (teardown != null) teardown.join();
+                else {
+                    // A failed native start cleans itself up and releases its semaphore.
+                    // Wait for it to leave the bridge; stopping it again would release twice.
+                    synchronized (MoonBridge.class) { /* Wait for startup cleanup. */ }
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            runOnUiThread(() -> {
+                if (!stopped && !isFinishing() && !isDestroyed()) {
+                    getIntent().removeExtra(EXTRA_ROTATION_RECONNECT);
+                    recreatingForRotation = true;
+                    recreate();
+                    overridePendingTransition(0, 0);
+                }
+            });
+        }, "PortaRetry").start();
+    }
+
+    protected void setPreferredOrientationForCurrentDisplay() {
         if (nativeResolution) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
             return;
@@ -805,6 +862,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
         stopMicrophone();
         stopCamera();
+        reconnectPresentation = sessionUi.reconnecting(null);
         rotationRestart = true;
         displayedFailureDialog = true; // Expected local stop must never show a termination dialog.
         connected = connecting = false;
@@ -1235,6 +1293,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     protected void onDestroy() {
+        if (sessionUi != null) sessionUi.close();
         if (keyboardOverlay != null) keyboardOverlay.destroy();
         if (conn != null) conn.setInputObserver(null);
         super.onDestroy();
@@ -1336,8 +1395,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         stopped = true;
         rotationHandler.removeCallbacks(rotationReconnect);
 
-        SpinnerDialog.closeDialogs(this);
-        Dialog.closeDialogs();
+        if (sessionUi != null) sessionUi.close();
 
         if (virtualController != null) {
             virtualController.hide();
@@ -1615,6 +1673,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public boolean handleKeyDown(KeyEvent event) {
+        if (sessionUi != null && sessionUi.isShowing()) return false;
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && !event.isFromSource(InputDevice.SOURCE_MOUSE) &&
                 !event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE) && keyboardOverlay != null &&
                 (keyboardOverlay.isOpen() || keyboardBackDown)) {
@@ -1705,6 +1764,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public boolean handleKeyUp(KeyEvent event) {
+        if (sessionUi != null && sessionUi.isShowing()) return false;
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && keyboardBackDown) {
             keyboardBackDown = false;
             return true;
@@ -2519,14 +2579,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void stageStarting(final String stage) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (spinner != null) {
-                    spinner.setMessage(getResources().getString(R.string.conn_starting) + " " + stage);
-                }
-            }
-        });
+        LimeLog.info("Connection stage: " + stage);
     }
 
     @Override
@@ -2560,11 +2613,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             // thread to keep things smooth for the UI. Inside moonlight-common,
             // we prevent another thread from starting a connection before and
             // during the process of stopping this one.
-            new Thread() {
-                public void run() {
-                    conn.stop();
-                }
-            }.start();
+            stoppingConnection = new Thread(() -> conn.stop(), "PortaStop");
+            stoppingConnection.start();
         }
     }
 
@@ -2577,11 +2627,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (spinner != null) {
-                    spinner.dismiss();
-                    spinner = null;
-                }
-
                 if (!displayedFailureDialog) {
                     displayedFailureDialog = true;
                     LimeLog.severe(stage + " failed: " + errorCode);
@@ -2591,18 +2636,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         Toast.makeText(Game.this, getResources().getText(R.string.video_decoder_init_failed), Toast.LENGTH_LONG).show();
                     }
 
-                    String dialogText = getResources().getString(R.string.conn_error_msg) + " " + stage +" (error "+errorCode+")";
-
-                    if (portFlags != 0) {
-                        dialogText += "\n\n" + getResources().getString(R.string.check_ports_msg) + "\n" +
-                                MoonBridge.stringifyPortFlags(portFlags, "\n");
-                    }
-
-                    if (portTestResult != MoonBridge.ML_TEST_RESULT_INCONCLUSIVE && portTestResult != 0)  {
-                        dialogText += "\n\n" + getResources().getString(R.string.nettest_text_blocked);
-                    }
-
-                    Dialog.displayDialog(Game.this, getResources().getString(R.string.conn_error_title), dialogText, true);
+                    LimeLog.info("Connection ports: " + portFlags + "; connectivity test: " + portTestResult);
+                    if (!isFinishing() && !stopped)
+                        sessionUi.failed(SessionFailure.cause(errorCode, portFlags, portTestResult));
                 }
             }
         });
@@ -2637,62 +2673,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (!displayedFailureDialog) {
                     displayedFailureDialog = true;
                     LimeLog.severe("Connection terminated: " + errorCode);
-                    stopConnection();
-
-                    // Display the error dialog if it was an unexpected termination.
-                    // Otherwise, just finish the activity immediately.
-                    if (errorCode != MoonBridge.ML_ERROR_GRACEFUL_TERMINATION) {
-                        String message;
-
-                        if (portTestResult != MoonBridge.ML_TEST_RESULT_INCONCLUSIVE && portTestResult != 0) {
-                            // If we got a blocked result, that supersedes any other error message
-                            message = getResources().getString(R.string.nettest_text_blocked);
-                        }
-                        else {
-                            switch (errorCode) {
-                                case MoonBridge.ML_ERROR_NO_VIDEO_TRAFFIC:
-                                    message = getResources().getString(R.string.no_video_received_error);
-                                    break;
-
-                                case MoonBridge.ML_ERROR_NO_VIDEO_FRAME:
-                                    message = getResources().getString(R.string.no_frame_received_error);
-                                    break;
-
-                                case MoonBridge.ML_ERROR_UNEXPECTED_EARLY_TERMINATION:
-                                case MoonBridge.ML_ERROR_PROTECTED_CONTENT:
-                                    message = getResources().getString(R.string.early_termination_error);
-                                    break;
-
-                                case MoonBridge.ML_ERROR_FRAME_CONVERSION:
-                                    message = getResources().getString(R.string.frame_conversion_error);
-                                    break;
-
-                                default:
-                                    String errorCodeString;
-                                    // We'll assume large errors are hex values
-                                    if (Math.abs(errorCode) > 1000) {
-                                        errorCodeString = Integer.toHexString(errorCode);
-                                    }
-                                    else {
-                                        errorCodeString = Integer.toString(errorCode);
-                                    }
-                                    message = getResources().getString(R.string.conn_terminated_msg) + "\n\n" +
-                                            getResources().getString(R.string.error_code_prefix) + " " + errorCodeString;
-                                    break;
-                            }
-                        }
-
-                        if (portFlags != 0) {
-                            message += "\n\n" + getResources().getString(R.string.check_ports_msg) + "\n" +
-                                    MoonBridge.stringifyPortFlags(portFlags, "\n");
-                        }
-
-                        Dialog.displayDialog(Game.this, getResources().getString(R.string.conn_terminated_title),
-                                message, true);
+                    // Capture the surface before asynchronous decoder teardown.
+                    if (errorCode != MoonBridge.ML_ERROR_GRACEFUL_TERMINATION && !isFinishing() && !stopped) {
+                        LimeLog.info("Termination ports: " + portFlags + "; connectivity test: " + portTestResult);
+                        sessionUi.lost();
                     }
                     else {
                         finish();
                     }
+                    stopConnection();
                 }
             }
         });
@@ -2733,14 +2722,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (spinner != null) {
-                    spinner.dismiss();
-                    spinner = null;
-                }
-
                 if (rotationRestart || stopped) {
                     return;
                 }
+                sessionUi.hide();
+                reconnectPresentation = null;
                 connected = true;
                 cameraSupported = conn.supportsCamera();
                 refreshCamera();
@@ -2756,10 +2742,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 scheduleRotationReconnect();
 
                 // Hide the mouse cursor now after a short delay.
-                // Doing it before dismissing the spinner seems to be undone
-                // when the spinner gets displayed. On Android Q, even now
-                // is too early to capture. We will delay a second to allow
-                // the spinner to dismiss before capturing.
+                // Delay capture until the connection overlay has faded, including on Android Q.
                 Handler h = new Handler();
                 h.postDelayed(new Runnable() {
                     @Override
@@ -2797,7 +2780,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(Game.this, message, Toast.LENGTH_LONG).show();
+                LimeLog.info("Host message: " + message);
+                if (connected) Toast.makeText(Game.this, message, Toast.LENGTH_LONG).show();
             }
         });
     }

@@ -3,7 +3,9 @@ package com.limelight.utils;
 import java.util.ArrayList;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import android.view.ContextThemeWrapper;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.DialogInterface;
 import android.widget.Button;
 
@@ -63,7 +65,7 @@ public class Dialog implements Runnable {
         if (activity.isFinishing())
             return;
 
-        alert = new AlertDialog.Builder(activity).create();
+        alert = new MaterialAlertDialogBuilder(new ContextThemeWrapper(activity, R.style.Theme_Porta)).create();
 
         alert.setTitle(title);
         alert.setMessage(message);

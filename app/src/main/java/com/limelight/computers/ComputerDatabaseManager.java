@@ -139,6 +139,12 @@ public class ComputerDatabaseManager {
         try {
             ContentValues values = new ContentValues();
             ComputerDetails saved = getComputerByUUID(details.uuid);
+            // A discovery/manual-add result may only contain one of the known routes.
+            // Merge inside the transaction so an overlapping poll cannot erase the others.
+            if (saved != null) {
+                saved.update(details);
+                details = saved;
+            }
             values.put(LAST_USED_COLUMN_NAME, Math.max(details.lastUsed, saved == null ? 0 : saved.lastUsed));
             values.put(COMPUTER_UUID_COLUMN_NAME, details.uuid);
             values.put(COMPUTER_NAME_COLUMN_NAME, details.name);

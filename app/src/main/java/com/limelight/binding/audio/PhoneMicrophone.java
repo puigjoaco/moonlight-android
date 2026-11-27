@@ -77,9 +77,6 @@ public final class PhoneMicrophone {
         try {
             int size = Math.max(AudioRecord.getMinBufferSize(48000, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT), 3840);
-            codec = MediaCodec.createEncoderByType(MIME);
-            codec.configure(format(), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            codec.start();
             synchronized (recordLock) {
                 if (!running) return;
                 // Recognition preserves dictation audio; request AEC/NS explicitly below.
@@ -97,6 +94,10 @@ public final class PhoneMicrophone {
                 }
                 record.startRecording();
             }
+            // Overlap the microphone hardware warm-up with encoder initialization.
+            codec = MediaCodec.createEncoderByType(MIME);
+            codec.configure(format(), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            codec.start();
             MediaCodec encoder = codec;
             AudioRecord capture = record;
             MicrophonePump.run(capture::read, (pcm, pts) -> encode(encoder, pcm, pts), sink,

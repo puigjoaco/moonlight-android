@@ -72,6 +72,7 @@ public class ComputerDetails {
     // Transient attributes
     public State state;
     public AddressTuple activeAddress;
+    public boolean activeAddressIsTailscale;
     public int httpsPort;
     public int externalPort;
     public PairingManager.PairState pairState;
@@ -87,6 +88,23 @@ public class ComputerDetails {
     public ComputerDetails(ComputerDetails details) {
         // Copy details from the other computer
         update(details);
+    }
+
+    /** Literal Tailscale address recognition; never performs DNS on the UI thread. */
+    public static boolean isTailscaleAddress(String address) {
+        String host = address.toLowerCase(java.util.Locale.ROOT);
+        if (host.endsWith(".ts.net") || host.startsWith("fd7a:115c:a1e0:")) return true;
+        String[] octets = host.split("\\.", -1);
+        if (octets.length != 4) return false;
+        try {
+            for (String octet : octets) {
+                if (!octet.matches("[0-9]{1,3}") || Integer.parseInt(octet) > 255) return false;
+            }
+            int second = Integer.parseInt(octets[1]);
+            return Integer.parseInt(octets[0]) == 100 && second >= 64 && second <= 127;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     public int guessExternalPort() {
@@ -117,9 +135,11 @@ public class ComputerDetails {
         this.uuid = details.uuid;
         if (details.activeAddress != null) {
             this.activeAddress = details.activeAddress;
+            this.activeAddressIsTailscale = details.activeAddressIsTailscale;
         }
         // We can get IPv4 loopback addresses with GS IPv6 Forwarder
-        if (details.localAddress != null && !details.localAddress.address.startsWith("127.")) {
+        if (details.localAddress != null && !details.localAddress.address.startsWith("127.")
+                && !isTailscaleAddress(details.localAddress.address)) {
             this.localAddress = details.localAddress;
         }
         if (details.remoteAddress != null) {
@@ -129,7 +149,7 @@ public class ComputerDetails {
             // If we have a remote address already (perhaps via STUN) but our updated details
             // don't have a new one (because GFE doesn't send one), propagate the external
             // port to the current remote address. We may have tried to guess it previously.
-            this.remoteAddress.port = details.externalPort;
+            this.remoteAddress = new AddressTuple(this.remoteAddress.address, details.externalPort);
         }
         if (details.manualAddress != null) {
             this.manualAddress = details.manualAddress;
