@@ -38,6 +38,7 @@ static jmethodID BridgeClSetHdrModeMethod;
 static jmethodID BridgeClRumbleTriggersMethod;
 static jmethodID BridgeClSetMotionEventStateMethod;
 static jmethodID BridgeClSetControllerLEDMethod;
+static jmethodID BridgeClResizeResultMethod;
 static jbyteArray DecodedFrameBuffer;
 static jshortArray DecodedAudioBuffer;
 
@@ -101,6 +102,7 @@ Java_com_limelight_nvstream_jni_MoonBridge_init(JNIEnv *env, jclass clazz) {
     BridgeClSetHdrModeMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClSetHdrMode", "(Z[B)V");
     BridgeClRumbleTriggersMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClRumbleTriggers", "(SSS)V");
     BridgeClSetMotionEventStateMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClSetMotionEventState", "(SBS)V");
+    BridgeClResizeResultMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClResizeResult", "(IIII)V");
     BridgeClSetControllerLEDMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClSetControllerLED", "(SBBB)V");
 }
 
@@ -389,6 +391,14 @@ void BridgeClSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, u
     }
 }
 
+void BridgeClResizeResult(uint32_t sequence, uint8_t status, uint16_t width, uint16_t height) {
+    JNIEnv* env = GetThreadEnv();
+    (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeClResizeResultMethod, (jint)sequence, (jint)status, (jint)width, (jint)height);
+    if ((*env)->ExceptionCheck(env)) {
+        (*JVM)->DetachCurrentThread(JVM);
+    }
+}
+
 void BridgeClLogMessage(const char* format, ...) {
     va_list va;
     va_start(va, format);
@@ -426,6 +436,7 @@ static CONNECTION_LISTENER_CALLBACKS BridgeConnListenerCallbacks = {
         .rumbleTriggers = BridgeClRumbleTriggers,
         .setMotionEventState = BridgeClSetMotionEventState,
         .setControllerLED = BridgeClSetControllerLED,
+        .resizeResult = BridgeClResizeResult,
 };
 
 static bool

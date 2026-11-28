@@ -8,6 +8,8 @@ public interface NvConnectionListener {
     void connectionStarted();
     void connectionTerminated(int errorCode);
     void connectionStatusUpdate(int connectionStatus);
+
+    void resizeResult(int sequence, int status, int width, int height);
     
     void displayMessage(String message);
     void displayTransientMessage(String message);

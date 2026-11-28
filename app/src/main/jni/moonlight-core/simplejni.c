@@ -290,6 +290,16 @@ Java_com_limelight_nvstream_jni_MoonBridge_sendMicrophoneFrame(JNIEnv *env, jcla
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_supportsResize(JNIEnv *env, jclass clazz) {
+    return LiSupportsResize();
+}
+JNIEXPORT jint JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_sendResizeRequest(JNIEnv *env, jclass clazz, jint sequence, jint width, jint height) {
+    if (width < 256 || width > 4096 || height < 256 || height > 4096) return -1;
+    return LiSendResizeRequest((uint32_t)sequence, (uint16_t)width, (uint16_t)height);
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_limelight_nvstream_jni_MoonBridge_supportsCamera(JNIEnv *env, jclass clazz) {
     return LiSupportsCamera();
 }

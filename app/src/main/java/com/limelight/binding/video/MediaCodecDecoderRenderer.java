@@ -66,6 +66,24 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     private byte optimalSlicesPerFrame;
     private boolean refFrameInvalidationActive;
     private int initialWidth, initialHeight;
+    private volatile boolean inSessionResizeSupported;
+    private boolean resizeDecoderPending;
+    private boolean awaitingResizeIdr;
+    private volatile boolean resizeAwaitingOutput;
+    private volatile long announcedDimensions;
+    private Runnable resizeFailureListener;
+
+    public void enableInSessionResize(boolean supported, Runnable failureListener) {
+        resizeFailureListener = failureListener;
+        inSessionResizeSupported = supported;
+    }
+
+    // The result may arrive before its IDR. If that IDR is lost, do not feed new-size
+    // inter frames into an old-size decoder while waiting for a subsequent SPS.
+    public void expectStreamDimensions(int width, int height) {
+        announcedDimensions = ((long) width << 32) | (height & 0xffffffffL);
+    }
+
     private int videoFormat;
     private SurfaceHolder renderTarget;
     private volatile boolean stopping;
@@ -709,6 +727,29 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                 nextInputBufferIndex = -1;
                 outputBufferQueue.clear();
 
+                // A stream size change uses the same quiescence barrier as recovery. Stop
+                // releases all old-size buffers before the new SPS/IDR is submitted. Reuse
+                // the accepted format so vendor low-latency options and HDR stay intact.
+                if (resizeDecoderPending) {
+                    resizeDecoderPending = false;
+                    try {
+                        try {
+                            videoDecoder.stop();
+                            configureAndStartDecoder(configuredFormat);
+                        } catch (IllegalStateException | IllegalArgumentException restartError) {
+                            videoDecoder.reset();
+                            configureAndStartDecoder(configuredFormat);
+                        }
+                        // Armed before other threads resume so their first failure also falls back.
+                        resizeAwaitingOutput = true;
+                        android.util.Log.i("PortaResize", "decoder ready " + initialWidth + "x" + initialHeight);
+                    } catch (IllegalStateException | IllegalArgumentException resizeError) {
+                        android.util.Log.e("PortaResize", "decoder resize failed", resizeError);
+                        stopping = true;
+                    }
+                    codecRecoveryType.set(CR_RECOVERY_TYPE_NONE);
+                }
+
                 // If we just need a flush, do so now with all threads quiesced.
                 if (codecRecoveryType.get() == CR_RECOVERY_TYPE_FLUSH) {
                     LimeLog.warning("Flushing decoder");
@@ -834,6 +875,15 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     private boolean handleDecoderException(IllegalStateException e) {
         // Eat decoder exceptions if we're in the process of stopping
         if (stopping) {
+            return false;
+        }
+
+        // The new size has not produced a frame yet: reconnect instead of retrying the same format.
+        if (resizeAwaitingOutput && !(e instanceof CodecException && ((CodecException) e).isTransient())) {
+            android.util.Log.e("PortaResize", "decode failed after resize", e);
+            resizeAwaitingOutput = false;
+            stopping = true;
+            if (resizeFailureListener != null) resizeFailureListener.run();
             return false;
         }
 
@@ -1022,6 +1072,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                         // Try to output a frame
                         int outIndex = videoDecoder.dequeueOutputBuffer(info, 50000);
                         if (outIndex >= 0) {
+                            resizeAwaitingOutput = false;
                             long presentationTimeUs = info.presentationTimeUs;
                             int lastIndex = outIndex;
 
@@ -1344,6 +1395,75 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         }
     }
 
+    private boolean resizeDecoder(StreamDimensions dimensions) {
+        // In HEVC the VPS has already arrived when we see the SPS. Keep this IDR's
+        // parameter sets across configureAndStartDecoder(), which clears CSD state.
+        ArrayList<byte[]> vps = new ArrayList<>(vpsBuffers);
+        ArrayList<byte[]> sps = new ArrayList<>(spsBuffers);
+        ArrayList<byte[]> pps = new ArrayList<>(ppsBuffers);
+        doCodecRecoveryIfRequired(CR_FLAG_INPUT_THREAD);
+        synchronized (codecRecoveryMonitor) {
+            if (stopping) return false;
+            android.util.Log.i("PortaResize", "decoder switch " + initialWidth + "x" + initialHeight +
+                    " -> " + dimensions.width + "x" + dimensions.height + " codec=" + configuredFormat.getString(MediaFormat.KEY_MIME));
+            initialWidth = dimensions.width;
+            initialHeight = dimensions.height;
+            configuredFormat.setInteger(MediaFormat.KEY_WIDTH, initialWidth);
+            configuredFormat.setInteger(MediaFormat.KEY_HEIGHT, initialHeight);
+            if (adaptivePlayback) {
+                configuredFormat.setInteger(MediaFormat.KEY_MAX_WIDTH, initialWidth);
+                configuredFormat.setInteger(MediaFormat.KEY_MAX_HEIGHT, initialHeight);
+            }
+            resizeDecoderPending = true;
+            codecRecoveryType.set(CR_RECOVERY_TYPE_RESTART);
+        }
+        doCodecRecoveryIfRequired(CR_FLAG_INPUT_THREAD);
+        vpsBuffers.clear(); vpsBuffers.addAll(vps);
+        spsBuffers.clear(); spsBuffers.addAll(sps);
+        ppsBuffers.clear(); ppsBuffers.addAll(pps);
+        if (stopping && resizeFailureListener != null) resizeFailureListener.run();
+        return !stopping;
+    }
+
+    /** Inspect before submitting any part of a new-size IDR to MediaCodec. */
+    private boolean prepareStreamDimensions(byte[] data, int length, int type, int frameType) {
+        if (!inSessionResizeSupported) return true;
+        if (frameType != MoonBridge.FRAME_TYPE_IDR) {
+            if (awaitingResizeIdr) return false;
+            long announced = announcedDimensions;
+            if (announced != 0 && announced != (((long) initialWidth << 32) | (initialHeight & 0xffffffffL))) {
+                android.util.Log.w("PortaResize", "result before new-size IDR; request IDR");
+                return false;
+            }
+        }
+        try {
+            StreamDimensions dimensions = null;
+            if (type == MoonBridge.BUFFER_TYPE_SPS) {
+                if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_H264) != 0) dimensions = StreamDimensions.h264(data, length);
+                else if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_H265) != 0) dimensions = StreamDimensions.hevc(data, length);
+            } else if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_AV1) != 0) {
+                dimensions = StreamDimensions.av1(data, length);
+            }
+            if (dimensions != null) {
+                if (dimensions.width != initialWidth || dimensions.height != initialHeight) {
+                    if (frameType != MoonBridge.FRAME_TYPE_IDR) {
+                        awaitingResizeIdr = true;
+                        android.util.Log.w("PortaResize", "new dimensions without IDR; request IDR");
+                        return false;
+                    }
+                    if (!resizeDecoder(dimensions)) return false;
+                }
+                if (frameType == MoonBridge.FRAME_TYPE_IDR) awaitingResizeIdr = false;
+            }
+            // Never queue a mismatched inter frame, or a key frame missing its new sequence header.
+            return !awaitingResizeIdr || type != MoonBridge.BUFFER_TYPE_PICDATA;
+        } catch (IllegalArgumentException malformedHeader) {
+            awaitingResizeIdr = true;
+            android.util.Log.w("PortaResize", "invalid size header; request IDR", malformedHeader);
+            return false;
+        }
+    }
+
     @SuppressWarnings("deprecation")
     @Override
     public int submitDecodeUnit(byte[] decodeUnitData, int decodeUnitLength, int decodeUnitType,
@@ -1372,6 +1492,10 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         }
 
         lastFrameNumber = frameNumber;
+
+        if (!prepareStreamDimensions(decodeUnitData, decodeUnitLength, decodeUnitType, frameType)) {
+            return MoonBridge.DR_NEED_IDR;
+        }
 
         // Flip stats windows roughly every second
         if (SystemClock.uptimeMillis() >= activeWindowVideoStats.measurementStartTimestamp + 1000) {

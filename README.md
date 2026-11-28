@@ -43,9 +43,13 @@ The `nonRootDebug` build installs beside upstream as `app.porta`, labeled
 **Porta**. Select a **Native fullscreen** resolution to follow device
 orientation at native panel pixels. Fixed resolutions retain upstream behavior;
 Android's rotation lock is respected. Landscape/portrait changes are debounced
-for 250 ms, then stop only the stream and quietly recreate the streaming activity
-after teardown. No host-app quit request is sent. A compatible Sunshine host can
-retain its virtual display during the brief reconnect.
+for 250 ms. Hosts advertising `a=x-ss-resize.version:1` resize within the existing
+encrypted session; microphone and camera capture keep running. The decoder reads
+H.264/HEVC SPS or AV1 sequence headers and restarts at the new size before queuing
+the key frame. A rejection, decoder failure, or missing result after four seconds
+uses the existing stream reconnect path. Older hosts use that reconnect path as
+before. No host-app quit request is sent. A compatible Sunshine host can retain
+its virtual display during the brief reconnect.
 
 Both `/launch` and `/resume` carry the optional HTTPS query parameter
 `virtualDisplayScale`, derived from Android logical density (`densityDpi / 240`)

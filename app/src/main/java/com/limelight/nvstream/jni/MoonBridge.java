@@ -126,6 +126,8 @@ public class MoonBridge {
 
     public static final byte LI_BATTERY_PERCENTAGE_UNKNOWN = (byte)0xFF;
 
+    public static native boolean supportsResize();
+    public static native int sendResizeRequest(int sequence, int width, int height);
     public static native boolean supportsCamera();
     public static native int sendCameraChunk(byte[] packet);
     public static native boolean supportsMicrophone();
@@ -331,6 +333,10 @@ public class MoonBridge {
         if (connectionListener != null) {
             connectionListener.setControllerLED(controllerNumber, r, g, b);
         }
+    }
+
+    public static void bridgeClResizeResult(int sequence, int status, int width, int height) {
+        if (connectionListener != null) connectionListener.resizeResult(sequence, status, width, height);
     }
 
     public static void setupBridge(VideoDecoderRenderer videoRenderer, AudioRenderer audioRenderer, NvConnectionListener connectionListener) {

@@ -19,6 +19,7 @@ import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
+import com.limelight.utils.RotationResizeState;
 import com.limelight.nvstream.StreamConfiguration;
 import com.limelight.utils.NativeDisplayPolicy;
 import com.limelight.nvstream.http.ComputerDetails;
@@ -125,7 +126,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean recreatingForRotation;
     private boolean stopped;
     private final Handler rotationHandler = new Handler();
-    private final Runnable rotationReconnect = this::reconnectForRotation;
+    private final Runnable rotationReconnect = this::resizeForRotation;
+    private final RotationResizeState resizeState = new RotationResizeState();
+    private Runnable resizeTimeout;
+    private boolean resizeFallbackPending;
     private Thread stoppingConnection;
     private SessionUi sessionUi;
     private SessionUi.ReconnectPresentation reconnectPresentation;
@@ -847,16 +851,122 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    private void updateStreamViewSize(Display display) {
+        // Until Marshmallow, we can't ask for a 4K display mode, so we'll
+        // need to hint the OS to provide one.
+        boolean aspectRatioMatch = false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            // We'll calculate whether we need to scale by aspect ratio. If not, we'll use
+            // setFixedSize so we can handle 4K properly. The only known devices that have
+            // >= 4K screens have exactly 4K screens, so we'll be able to hit this good path
+            // on these devices. On Marshmallow, we can start changing to 4K manually but no
+            // 4K devices run 6.0 at the moment.
+            Point screenSize = new Point(0, 0);
+            display.getSize(screenSize);
+
+            double screenAspectRatio = ((double)screenSize.y) / screenSize.x;
+            double streamAspectRatio = ((double)prefConfig.height) / prefConfig.width;
+            if (Math.abs(screenAspectRatio - streamAspectRatio) < 0.001) {
+                LimeLog.info("Stream has compatible aspect ratio with output display");
+                aspectRatioMatch = true;
+            }
+        }
+
+        if (prefConfig.stretchVideo || aspectRatioMatch) {
+            // Set the surface to the size of the video
+            streamView.getHolder().setFixedSize(prefConfig.width, prefConfig.height);
+        }
+        else {
+            // Set the surface to scale based on the aspect ratio of the stream
+            streamView.setDesiredAspectRatio((double)prefConfig.width / (double)prefConfig.height);
+        }
+    }
+
+    private void cancelResizeTimeout() {
+        if (resizeTimeout != null) rotationHandler.removeCallbacks(resizeTimeout);
+        resizeTimeout = null;
+    }
+
+    private void resizeForRotation() {
+        if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() ||
+                microphonePermissionPending || cameraPermissionPending ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode())) return;
+        if (resizeFallbackPending) {
+            reconnectForRotation(true);
+            return;
+        }
+        if (!conn.supportsResize()) {
+            reconnectForRotation();
+            return;
+        }
+        boolean portrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+        int width = NativeDisplayPolicy.width(prefConfig.width, prefConfig.height, portrait);
+        int height = NativeDisplayPolicy.height(prefConfig.width, prefConfig.height, portrait);
+        // Compare against the last requested target, including a return to the original axis
+        // while an earlier request is still in flight.
+        if (!resizeState.needsRequest(prefConfig.width, prefConfig.height, width, height)) return;
+        int sequence = resizeState.begin(width, height);
+        cancelResizeTimeout();
+        android.util.Log.i("PortaResize", "send seq=" + Integer.toUnsignedString(sequence) + " " + width + "x" + height);
+        resizeTimeout = () -> {
+            if (resizeState.isPending(sequence)) fallbackResize("timeout seq=" + Integer.toUnsignedString(sequence));
+        };
+        rotationHandler.postDelayed(resizeTimeout, RotationResizeState.TIMEOUT_MS);
+        if (conn.sendResizeRequest(sequence, width, height) != 0) fallbackResize("send failed");
+    }
+
+    private void fallbackResize(String reason) {
+        android.util.Log.w("PortaResize", "fallback " + reason);
+        cancelResizeTimeout();
+        resizeState.clear();
+        resizeFallbackPending = true;
+        // The host may already have applied a superseded request, even when our current
+        // preference happens to match the final axis. Force teardown in that case too.
+        reconnectForRotation(true);
+    }
+
+    @Override
+    public void resizeResult(int sequence, int status, int width, int height) {
+        runOnUiThread(() -> {
+            if (stopped || rotationRestart || !connected) return;
+            if (!resizeState.isPending(sequence)) {
+                android.util.Log.i("PortaResize", "ignore stale seq=" + Integer.toUnsignedString(sequence));
+                return;
+            }
+            if (status != 0 || !resizeState.matchesSize(width, height)) {
+                fallbackResize("result seq=" + Integer.toUnsignedString(sequence) + " status=" + status + " " + width + "x" + height);
+                return;
+            }
+            cancelResizeTimeout();
+            resizeState.clear();
+            cancelTouchContexts();
+            decoderRenderer.expectStreamDimensions(width, height);
+            prefConfig.width = width;
+            prefConfig.height = height;
+            updateStreamViewSize(getWindowManager().getDefaultDisplay());
+            streamView.requestLayout();
+            updatePipAutoEnter();
+            android.util.Log.i("PortaResize", "applied seq=" + Integer.toUnsignedString(sequence) + " " + width + "x" + height);
+        });
+    }
+
     private void reconnectForRotation() {
+        reconnectForRotation(false);
+    }
+
+    private void reconnectForRotation(boolean force) {
         if (!nativeResolution || rotationRestart || stopped || !connected || isFinishing() || microphonePermissionPending || cameraPermissionPending ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode())) {
             return;
         }
         boolean portrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
-        if (!NativeDisplayPolicy.needsReconnect(prefConfig.width, prefConfig.height, portrait)) {
+        if (!force && !NativeDisplayPolicy.needsReconnect(prefConfig.width, prefConfig.height, portrait)) {
             return;
         }
 
+        cancelResizeTimeout();
+        resizeState.clear();
+        resizeFallbackPending = false;
         LimeLog.info("Reconnecting native stream for " + (portrait ? "portrait" : "landscape"));
         cancelTouchContexts();
         if (keyboardOverlay != null) keyboardOverlay.setConnected(false);
@@ -1189,34 +1299,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             getWindow().setAttributes(windowLayoutParams);
         }
 
-        // Until Marshmallow, we can't ask for a 4K display mode, so we'll
-        // need to hint the OS to provide one.
-        boolean aspectRatioMatch = false;
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            // We'll calculate whether we need to scale by aspect ratio. If not, we'll use
-            // setFixedSize so we can handle 4K properly. The only known devices that have
-            // >= 4K screens have exactly 4K screens, so we'll be able to hit this good path
-            // on these devices. On Marshmallow, we can start changing to 4K manually but no
-            // 4K devices run 6.0 at the moment.
-            Point screenSize = new Point(0, 0);
-            display.getSize(screenSize);
-
-            double screenAspectRatio = ((double)screenSize.y) / screenSize.x;
-            double streamAspectRatio = ((double)prefConfig.height) / prefConfig.width;
-            if (Math.abs(screenAspectRatio - streamAspectRatio) < 0.001) {
-                LimeLog.info("Stream has compatible aspect ratio with output display");
-                aspectRatioMatch = true;
-            }
-        }
-
-        if (prefConfig.stretchVideo || aspectRatioMatch) {
-            // Set the surface to the size of the video
-            streamView.getHolder().setFixedSize(prefConfig.width, prefConfig.height);
-        }
-        else {
-            // Set the surface to scale based on the aspect ratio of the stream
-            streamView.setDesiredAspectRatio((double)prefConfig.width / (double)prefConfig.height);
-        }
+        updateStreamViewSize(display);
 
         // Set the desired refresh rate that will get passed into setFrameRate() later
         desiredRefreshRate = displayRefreshRate;
@@ -1285,6 +1368,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         else {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             decoderRenderer.notifyVideoForeground();
+            scheduleRotationReconnect();
         }
 
         // Correct the system UI visibility flags
@@ -1394,6 +1478,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         super.onStop();
         stopped = true;
         rotationHandler.removeCallbacks(rotationReconnect);
+        cancelResizeTimeout();
+        resizeState.clear();
+        resizeFallbackPending = false;
 
         if (sessionUi != null) sessionUi.close();
 
@@ -2595,6 +2682,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void stopConnection() {
+        cancelResizeTimeout();
+        resizeState.clear();
+        resizeFallbackPending = false;
         cancelTouchContexts();
         stopMicrophone();
         stopCamera();
@@ -2719,6 +2809,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void connectionStarted() {
+        decoderRenderer.enableInSessionResize(conn.supportsResize(),
+                () -> runOnUiThread(() -> {
+                    if (!stopped && connected && !rotationRestart) fallbackResize("decoder resize failed");
+                }));
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
